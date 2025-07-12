@@ -178,7 +178,7 @@ class GPSReceive:
                         return True
                     if data[3] == 0x00:
                         return False
-        return False
+        return None
     
     def setrate(self, rate, measurements_per_nav_solution):
         measurement_time_delta_ms = int(1000/rate)
