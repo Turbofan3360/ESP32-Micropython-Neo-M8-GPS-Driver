@@ -162,6 +162,23 @@ class GPSReceive:
         
         return ck_a, ck_b
     
+    def _ubx_ack_nack(self):
+        start = time.time()
+        
+        while time.time() < start+1:
+            if self.gps.any() >= 10:
+                data = self.gps.read()
+                
+                index = data.find(b'\xb5\x62\x05')
+                if index != -1:
+                    data = data[index:]
+                    
+                    if data[3] == 0x01:
+                        return True
+                    if data[3] == 0x00:
+                        return False
+        return False
+    
     def setrate(self, rate, measurements_per_nav_solution):
         measurement_time_delta_ms = int(1000/rate)
         # Packing up the key settings that need changing
@@ -179,10 +196,15 @@ class GPSReceive:
         packet = b'\xb5\x62' + packet
         
         self.gps.write(packet)
-
+        
+        # Checking for the ACK or NACK
+        if self._ubx_ack_nack():
+            return True
+        return False
+        
 if __name__ == "__main__":
     gps = GPSReceive(10, 9)
-    gps.setrate(2, 3)
+    print(gps.setrate(2, 3))
     while True:
         lat, long, alt, total_error, sog, cog, mag_variation, geo_sep, timestamp = gps.getdata()
         print(lat, long, alt, total_error, sog, cog, mag_variation, geo_sep, timestamp)
