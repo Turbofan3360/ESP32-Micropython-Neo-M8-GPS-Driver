@@ -4,7 +4,7 @@
 
 This code reads data off of a UART pin on the ESP32. The Neo-M8 modules outputs NMEA sentences, which this code then converts into the useful data needed. Note that all outputs are as strings with their correct units. 
 
-As standard, the module updates its navigation fixes at a rate of 1Hz. This can be changed by calling the setrate() method, which takes two arguments: the first is the navigation solution update rate, while the second is the number of measurements per navigation solution.
+As standard, the module updates its navigation fixes at a rate of 1Hz. This can be changed by calling the setrate() method, which takes two arguments: the first is the navigation solution update rate, while the second is the number of measurements per navigation solution. The setrate() method returns either True or False, depending on whether it received an ACK or a NACK (respectively) from the module.
 
 The getdata() method is an aggregator - it calls the other methods (ensuring that they only process the NMEA sentences from one data frame). This returns all the data you can get from the module - including a combined, 3D position error to a 2σ confidence level. Other errors (returned from the position and altitude methods) are only to a 1σ confidence level.
 
@@ -18,7 +18,7 @@ The code automatically disables the VTG NMEA sentence type, as it contains data 
 import gps_reading_data.py as gps
 
 module = gps.GPSReceive(10, 9)
-module.setrate(2, 3)
+print(module.setrate(2, 3))
 
 lat, long, position_error, time_stamp = module.position()
 sog, cog, mag_variation, time_stamp = module.velocity()
