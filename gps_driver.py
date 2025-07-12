@@ -164,10 +164,11 @@ class GPSReceive:
     
     def _ubx_ack_nack(self):
         start = time.time()
+        data = b''
         
         while time.time() < start+1:
             if self.gps.any() >= 10:
-                data = self.gps.read()
+                data += self.gps.read()
                 
                 index = data.find(b'\xb5\x62\x05')
                 if index != -1:
@@ -198,9 +199,7 @@ class GPSReceive:
         self.gps.write(packet)
         
         # Checking for the ACK or NACK
-        if self._ubx_ack_nack():
-            return True
-        return False
+        return self._ubx_ack_nack()
         
 if __name__ == "__main__":
     gps = GPSReceive(10, 9)
