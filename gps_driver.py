@@ -219,7 +219,7 @@ class GPSReceive:
         flag = self._ubx_ack_nack()
         
         if flag:
-            # Using UBX-CFG-NAV5 to set module to: airborne with <4g acceleration, 3D fix only, satellites 15 degrees above horizon to be used for a fix, pDOP/tDOP = 15, pAcc = 30m, tAcc = 50m, static hold at <20cm/s and 1m, automatic UTC standard
+            # Using UBX-CFG-NAV5 to set module to: airborne with <4g acceleration, 3D fix only, satellites 15 degrees above horizon to be used for a fix, static hold at <20cm/s and 1m, automatic UTC standard
             packet = b'\x06\x24' + b'$\x00' + b'G\x08' + b'\x08' + b'\x02' + b'\x00\x00\x00\x00' + b'\x00\x00\x00\x00' + b'\x14' + b'\x00' + b'\x00\x00' + b'\x00\x00' + b'\x00\x00' + b'\x00\x00' + b'\x14' + b'\x00' + b'\x00' + b'\x00' + b'\x00' + b'\x01' + b'\x00' + b'\x00\x00\x00\x00\x00\x00\x00'
 
             ck_a, ck_b = self._ubx_checksum(packet)
