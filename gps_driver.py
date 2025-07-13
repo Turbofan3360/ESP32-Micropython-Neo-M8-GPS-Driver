@@ -4,11 +4,15 @@ import time, struct
 
 class GPSReceive:
     def __init__(self, rx_pin, tx_pin):
-        self.gps = UART(2, baudrate=9600, tx=tx_pin, rx=rx_pin)
+        self.tx_pin = tx_pin
+        self.rx_pin = rx_pin
+        self.gps = UART(2, baudrate=9600, tx=self.tx_pin, rx=self.rx_pin)
         
         self.data = {}
         
-        self._disable_vtg_sentence()
+        flag = False    
+        while not flag:
+            flag = self._modulesetup()
     
     def _checksum(self, nmea_sentence):
         checksum = 0
@@ -23,11 +27,17 @@ class GPSReceive:
             return True
         return False
     
-    def _disable_vtg_sentence(self):
-        # Uses UBX-CFG-MSG sentence to disable the VTG NMEA sentence
-        packet = b'\xb5\x62\x06\x01\x03\x00\xF0\x05\x00\xff\x19'
-        # Writing sentence
-        self.gps.write(packet)
+    def _ubx_checksum(self, ubx_packet):
+        ck_a = ck_b = 0
+        
+        for byte in ubx_packet:
+            ck_a += byte
+            ck_b += ck_a
+            
+        ck_a &= 0xFF
+        ck_b &= 0xFF
+        
+        return struct.pack("<B", ck_a), struct.pack("<B", ck_b)
         
     def _update_data(self):
         num_sentences_read = 0
@@ -53,14 +63,19 @@ class GPSReceive:
             self._update_data()
         except UnicodeError:
             self._update_data()
-            
+        
         try:
             gll_sentence = self.data["GLL"].split(",")
-            gsa_sentence = self.data["GSA"].split(",")
-        except KeyError:
+            time_utc = gll_sentence[5]
+            time_stamp = time_utc[:2] + ":" + time_utc[2:4] + ":" + time_utc[4:]
+        except (KeyError, IndexError) as e:
             return 0, 0, 0, 0
-        # potential for there to be no GLL sentence, especially at first run of update_data code
         
+        try:
+            gsa_sentence = self.data["GSA"].split(",")
+        except:
+            return 0, 0, 0, time_stamp
+
         # checking status flag before extracting lat/long/timestamp
         if gll_sentence[6] == "A":
             pos_minutes = gll_sentence[1].find(".")-2
@@ -73,15 +88,12 @@ class GPSReceive:
             degrees = int(gll_sentence[3][:pos_minutes])
             long = str(degrees+minutes/60) + gll_sentence[4]
             
-            time_utc = gll_sentence[5]
-            time_stamp = time_utc[:2] + ":" + time_utc[2:4] + ":" + time_utc[4:]
-            
             # This is the 2D horizontal position error
             hdop = float(gsa_sentence[-3])
             position_error = hdop * 2.5 # 68% confidence level, 1 sigma - estimated accuracy of GPS module is ~2.5m from datasheet
             
             return lat, long, position_error, time_stamp
-        return 0, 0, 0, 0
+        return 0, 0, 0, time_stamp
         
     def velocity(self, data_needs_updating=True):
         if data_needs_updating:
@@ -92,12 +104,12 @@ class GPSReceive:
             
         try:
             rmc_sentence = self.data["RMC"].split(",")
-        except KeyError:
+            time_utc = rmc_sentence[1]
+            time_stamp = time_utc[:2] + ":" + time_utc[2:4] + ":" + time_utc[4:]
+        except (KeyError, IndexError) as e:
             return 0, 0, 0, 0
         
         if rmc_sentence[2] == "A":
-            time_utc = rmc_sentence[1]
-            time_stamp = time_utc[:2] + ":" + time_utc[2:4] + ":" + time_utc[4:]
             sog = rmc_sentence[7] + "Kn"
             
             if rmc_sentence[8]:
@@ -111,7 +123,7 @@ class GPSReceive:
                 mag_variation = "0°"
             
             return sog, cog, mag_variation, time_stamp
-        return 0, 0, 0, 0
+        return 0, 0, 0, time_stamp
 
     def altitude(self, data_needs_updating=True):
         if data_needs_updating:
@@ -122,16 +134,19 @@ class GPSReceive:
             
         try:
             gga_sentence = self.data["GGA"].split(",")
+            time_utc = gga_sentence[1]
+            time_stamp = time_utc[:2] + ":" + time_utc[2:4] + ":" + time_utc[4:]
+        except (KeyError, IndexError) as e:
+            return 0, 0, 0, 0
+        
+        try:
             gsa_sentence = self.data["GSA"].split(",")
         except KeyError:
-            return 0, 0, 0, 0
+            return 0, 0, 0, time_stamp
         
         if gga_sentence[6] != "0":
             alt = gga_sentence[9] + "M AMSL"
             geo_sep = gga_sentence[11] + "M"
-            
-            time_utc = gga_sentence[1]
-            time_stamp = time_utc[:2] + ":" + time_utc[2:4] + ":" + time_utc[4:]
             
             vdop = float(gsa_sentence[-2])
             
@@ -139,28 +154,26 @@ class GPSReceive:
             
             return alt, geo_sep, vertical_error, time_stamp
         
-        return 0, 0, 0, 0
+        return 0, 0, 0, time_stamp
     
     def getdata(self):
-        lat, long, position_error, timestamp = self.position()
-        sog, cog, mag_variation, _ = self.velocity(data_needs_updating=False)
-        alt, geo_sep, vertical_error, _ = self.altitude(data_needs_updating=False)
+        lat, long, position_error, timestamp_0 = self.position()
+        sog, cog, mag_variation, timestamp_1 = self.velocity(data_needs_updating=False)
+        alt, geo_sep, vertical_error, timestamp_2 = self.altitude(data_needs_updating=False)
+        
+        # Trying to get timestamp from at least 1 method
+        if timestamp_0:
+            timestamp = timestamp_0
+        elif timestamp_1:
+            timestamp = timestamp_1
+        elif timestamp_2:
+            timestamp = timestamp_2
+        else:
+            timestamp = 0
         
         total_error = 2.45 * sqrt(position_error*position_error + vertical_error*vertical_error) # Combining errors into one 3D error. * 2.45 to get to ~95% confidence level (2 sigma)
         
         return lat, long, alt, total_error, sog, cog, mag_variation, geo_sep, timestamp
-    
-    def _ubx_checksum(self, ubx_packet):
-        ck_a = ck_b = 0
-        
-        for byte in ubx_packet:
-            ck_a += byte
-            ck_b += ck_a
-            
-        ck_a &= 0xFF
-        ck_b &= 0xFF
-        
-        return ck_a, ck_b
     
     def _ubx_ack_nack(self):
         start = time.time()
@@ -174,10 +187,11 @@ class GPSReceive:
                 if index != -1:
                     data = data[index:]
                     
-                    if data[3] == 0x01:
-                        return True
-                    if data[3] == 0x00:
-                        return False
+                    if len(data) >= 4:
+                        if data[3] == 0x01:
+                            return True
+                        if data[3] == 0x00:
+                            return False
         return None
     
     def setrate(self, rate, measurements_per_nav_solution):
@@ -189,8 +203,6 @@ class GPSReceive:
         packet = b'\x06\x08\x06\x00' + measurement_time_delta_ms + measurements_per_nav_solution + b'\x00\x00'
         # Getting checksums
         ck_a, ck_b = self._ubx_checksum(packet)
-        ck_a = struct.pack("<B", ck_a)
-        ck_b = struct.pack("<B", ck_b)
         
         packet += ck_a+ck_b
         # Adding header
@@ -201,9 +213,43 @@ class GPSReceive:
         # Checking for the ACK or NACK
         return self._ubx_ack_nack()
         
+    def _modulesetup(self):
+        # Uses UBX-CFG-MSG sentence to disable the VTG NMEA sentence
+        self.gps.write(b'\xb5\x62\x06\x01\x03\x00\xF0\x05\x00\xff\x19')
+        flag = self._ubx_ack_nack()
+        
+        if flag:
+            # Using UBX-CFG-NAV5 to set module to: airborne with <4g acceleration, 3D fix only, satellites 15 degrees above horizon to be used for a fix, pDOP/tDOP = 15, pAcc = 30m, tAcc = 50m, static hold at <20cm/s and 1m, automatic UTC standard
+            packet = b'\x06\x24' + b'$\x00' + b'G\x08' + b'\x08' + b'\x02' + b'\x00\x00\x00\x00' + b'\x00\x00\x00\x00' + b'\x14' + b'\x00' + b'\x00\x00' + b'\x00\x00' + b'\x00\x00' + b'\x00\x00' + b'\x14' + b'\x00' + b'\x00' + b'\x00' + b'\x00' + b'\x01' + b'\x00' + b'\x00\x00\x00\x00\x00\x00\x00'
+
+            ck_a, ck_b = self._ubx_checksum(packet)
+        
+            packet = b'\xb5\x62' + packet + ck_a + ck_b
+        
+            self.gps.write(packet)
+        
+            flag = self._ubx_ack_nack()
+        if flag:
+            # Constructing UBX-CFG-GNSS message to enable Galileo GNSS constellation use as well as standard GPS/GLONASS/SBAS
+            packet = b'\x06\x3e' + b'\x0c\x00' + b'\x00\x00\xff\x01' + b'\x02\x02\x08\x00\x01\x00\x10\x00'
+            
+            ck_a, ck_b = self._ubx_checksum(packet)
+            
+            packet = b'\xb5\x62' + packet + ck_a + ck_b
+            
+            self.gps.write(packet)
+            
+            flag = self._ubx_ack_nack()
+        return flag
+
+
 if __name__ == "__main__":
     gps = GPSReceive(10, 9)
-    print(gps.setrate(2, 3))
+    
+    flag = gps.setrate(2, 3)
+    while not flag:
+        flag = gps.setrate(2, 3)
+    
     while True:
         lat, long, alt, total_error, sog, cog, mag_variation, geo_sep, timestamp = gps.getdata()
         print(lat, long, alt, total_error, sog, cog, mag_variation, geo_sep, timestamp)
