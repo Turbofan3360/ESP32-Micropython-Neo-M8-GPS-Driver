@@ -9,10 +9,6 @@ class GPSReceive:
         self.gps = UART(2, baudrate=9600, tx=self.tx_pin, rx=self.rx_pin)
         
         self.data = {}
-        
-        flag = False    
-        while not flag:
-            flag = self._modulesetup()
     
     def _checksum(self, nmea_sentence):
         checksum = 0
@@ -66,10 +62,14 @@ class GPSReceive:
         
         try:
             gll_sentence = self.data["GLL"].split(",")
-            time_utc = gll_sentence[5]
-            time_stamp = time_utc[:2] + ":" + time_utc[2:4] + ":" + time_utc[4:]
-        except (KeyError, IndexError) as e:
+        except KeyError:
             return 0, 0, 0, 0
+        
+        time_utc = gll_sentence[5]
+        if time_utc:
+            time_stamp = time_utc[:2] + ":" + time_utc[2:4] + ":" + time_utc[4:]
+        else:
+            time_stamp = 0
         
         try:
             gsa_sentence = self.data["GSA"].split(",")
@@ -104,10 +104,14 @@ class GPSReceive:
             
         try:
             rmc_sentence = self.data["RMC"].split(",")
-            time_utc = rmc_sentence[1]
-            time_stamp = time_utc[:2] + ":" + time_utc[2:4] + ":" + time_utc[4:]
-        except (KeyError, IndexError) as e:
+        except KeyError:
             return 0, 0, 0, 0
+        
+        time_utc = rmc_sentence[1]
+        if time_utc:
+            time_stamp = time_utc[:2] + ":" + time_utc[2:4] + ":" + time_utc[4:]
+        else:
+            time_stamp = 0
         
         if rmc_sentence[2] == "A":
             sog = rmc_sentence[7] + "Kn"
@@ -134,10 +138,14 @@ class GPSReceive:
             
         try:
             gga_sentence = self.data["GGA"].split(",")
-            time_utc = gga_sentence[1]
-            time_stamp = time_utc[:2] + ":" + time_utc[2:4] + ":" + time_utc[4:]
-        except (KeyError, IndexError) as e:
+        except KeyError:
             return 0, 0, 0, 0
+        
+        time_utc = gga_sentence[1]
+        if time_utc:
+            time_stamp = time_utc[:2] + ":" + time_utc[2:4] + ":" + time_utc[4:]
+        else:
+            time_stamp = 0 
         
         try:
             gsa_sentence = self.data["GSA"].split(",")
@@ -213,7 +221,7 @@ class GPSReceive:
         # Checking for the ACK or NACK
         return self._ubx_ack_nack()
         
-    def _modulesetup(self):
+    def modulesetup(self):
         # Uses UBX-CFG-MSG sentence to disable the VTG NMEA sentence
         self.gps.write(b'\xb5\x62\x06\x01\x03\x00\xF0\x05\x00\xff\x19')
         flag = self._ubx_ack_nack()
@@ -223,23 +231,52 @@ class GPSReceive:
             packet = b'\x06\x24' + b'$\x00' + b'G\x08' + b'\x08' + b'\x02' + b'\x00\x00\x00\x00' + b'\x00\x00\x00\x00' + b'\x14' + b'\x00' + b'\x00\x00' + b'\x00\x00' + b'\x00\x00' + b'\x00\x00' + b'\x14' + b'\x00' + b'\x00' + b'\x00' + b'\x00' + b'\x01' + b'\x00' + b'\x00\x00\x00\x00\x00\x00\x00'
 
             ck_a, ck_b = self._ubx_checksum(packet)
-        
             packet = b'\xb5\x62' + packet + ck_a + ck_b
-        
             self.gps.write(packet)
         
             flag = self._ubx_ack_nack()
+            
         if flag:
+            # Using UBX-CFG-NAVX5 to set module to: min. satellites for navigation=4, max. satellites for navigation=50, initial fix must be 3D, AssistNow Autonomous turned on, maximum AssistNow Autonomous orbit error=20m
+            packet = b'\x06\x23' + b'(\x00' + b'\x00\x00' + b'D@' + b'\x00\x00\x00\x00' + b'\x00\x00' + b'\x04' + b'<' + b'\x00' + b'\x00' + b'\x01' + b'\x00' + b'\x00' + b'\x00\x00' + b'\x00\x00\x00\x00\x00\x00' + b'\x00' + b'\x01' + b'\x00\x00' + b'\x14\x00' + b'\x00\x00\x00\x00' + b'\x00\x00\x00\x00' + b'\x00'
+        
+            ck_a, ck_b = self._ubx_checksum(packet)
+            packet = b'\xb5\x62' + packet + ck_a + ck_b
+            self.gps.write(packet)
+            
+            flag = self._ubx_ack_nack()
+        
+        if 	flag:
             # Constructing UBX-CFG-GNSS message to enable Galileo GNSS constellation use as well as standard GPS/GLONASS/SBAS
             packet = b'\x06\x3e' + b'\x0c\x00' + b'\x00\x00\xff\x01' + b'\x02\x02\x08\x00\x01\x00\x10\x00'
             
             ck_a, ck_b = self._ubx_checksum(packet)
-            
             packet = b'\xb5\x62' + packet + ck_a + ck_b
-            
             self.gps.write(packet)
             
             flag = self._ubx_ack_nack()
+        
+        if flag:
+            # Constructing UBX-CFG-ITFM message to configure interference/jamming monitoring on the module - enabling interference detection, broadband threshold=7dB, continuous wave threshold=20dB, active antenna
+            packet = b'\x06\x39' + b'\x08\x00' + b'\xadb\xadG' + b'\x00\x00#\x1e'
+            
+            ck_a, ck_b = self._ubx_checksum(packet)
+            packet = b'\xb5\x62' + packet + ck_a + ck_b
+            self.gps.write(packet)
+            
+            flag = self._ubx_ack_nack()
+            
+        if flag:
+            # Constructing UBX-CFG-CFG message: saving all the above configured settings into the module's programmable flash
+            # This should be changed to saving into battery-backed RAM for NEO-M8Q and NEO-M8M which don't have programmable flash - do this by changing the byte b'\x02' below for the byte b'\x01' (assuming you have BBR, unless you want to save it into the SPI Flash)
+            packet = b'\x06\x09' + b'\r\x00' + b'\x00\x00\x00\x00' + b'\x00\x00\x00\x1a' + b'\x00\x00\x00\x00' + b'\x02'
+            
+            ck_a, ck_b = self._ubx_checksum(packet)
+            packet = b'\xb5\x62' + packet + ck_a + ck_b
+            self.gps.write(packet)
+            
+            flag = self._ubx_ack_nack()
+            
         return flag
 
 
