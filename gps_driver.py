@@ -1,12 +1,26 @@
 from machine import UART
-from math import sqrt
 import time, struct
 
 class GPSReceive:
     def __init__(self, rx_pin, tx_pin):
-        self.tx_pin = tx_pin
-        self.rx_pin = rx_pin
-        self.gps = UART(2, baudrate=9600, tx=self.tx_pin, rx=self.rx_pin)
+        """
+        Driver for the NEO-M8 series of GPS modules.
+        
+        Required parameters upon initialization: The ESP32 pin that the module's TX pin is connected to, followed by the ESP32 pin that the module's RX pin is connected to.
+        
+        Potential methods:
+            position() - Gets position information
+            velocity() - Gets velocity information
+            altitude() - Gets altitude information
+            getdata() - Aggregator of the previous methods
+            
+            setrate(rate, measurements per nav solution) - Enables you to set the rate of data output from the module
+            modulesetup() - Sets up the module to the settings required for my usage. Can be adapted to suit other uses. For the NEO-M8N and NEO-M8Q, this will need to be adjusted slightly. See the method for details.
+        
+        modulesetup() and setrate() return True, False or None depending on whether it received an ACK, NACK or nothing from the module.
+        """
+
+        self.gps = UART(2, baudrate=9600, tx=tx_pin, rx=rx_pin)
         
         self.data = {}
     
@@ -55,6 +69,14 @@ class GPSReceive:
             num_sentences_read += 1
     
     def position(self):
+        """
+        Returns a list of [latitude, longitude, horizontal error, timestamp] all formatted as strings.
+        
+        Latitude/longitude are as degrees, with N/S or E/W
+        Position error is in meters - fix error in 2D
+        Timestamp (UTC) is formatted as hh:mm:ss
+        """
+        
         try:
             self._update_data()
         except UnicodeError:
@@ -96,6 +118,15 @@ class GPSReceive:
         return 0, 0, 0, time_stamp
         
     def velocity(self, data_needs_updating=True):
+        """
+        Returns a list of [speed over ground, course over ground, magnetic variation, timestamp] all formatted as strings
+        
+        SOG is in Knots (Kn)
+        COG is in degrees
+        Magnetic variation is in degrees
+        Timestamp (UTC) formatted as hh:mm:ss
+        """
+        
         if data_needs_updating:
             try:
                 self._update_data()
@@ -130,6 +161,15 @@ class GPSReceive:
         return 0, 0, 0, time_stamp
 
     def altitude(self, data_needs_updating=True):
+        """
+        Returns a list of [altitude, geoid separation, vertical error, timestamp] all as strings
+        
+        Altitude is in meters
+        Geoid separation is in meters
+        Vertical error is in meters
+        Timestamp (UTC) is formatted as hh:mm:ss
+        """
+        
         if data_needs_updating:
             try:
                 self._update_data()
@@ -165,6 +205,19 @@ class GPSReceive:
         return 0, 0, 0, time_stamp
     
     def getdata(self):
+        """
+        Returns list of [latitude, longitude, altitude, position error, sog, cog, magnetic variation, geoid separation, timestamp]
+        
+        Latitude/longitude are as degrees, with N/S or E/W
+        Altitude is in meters
+        Position error is in meters - the error of the fix in 3D
+        SOG is in Knots (Kn)
+        COG is in degrees
+        Magnetic variation is in degrees
+        Geoid separation is in meters
+        Timestamp (UTC) is formatted as hh:mm:ss
+        """
+        
         lat, long, position_error, timestamp_0 = self.position()
         sog, cog, mag_variation, timestamp_1 = self.velocity(data_needs_updating=False)
         alt, geo_sep, vertical_error, timestamp_2 = self.altitude(data_needs_updating=False)
@@ -179,7 +232,7 @@ class GPSReceive:
         else:
             timestamp = 0
         
-        total_error = 2.45 * sqrt(position_error*position_error + vertical_error*vertical_error) # Combining errors into one 3D error. * 2.45 to get to ~95% confidence level (2 sigma)
+        total_error = 2.45 * (position_error*position_error + vertical_error*vertical_error)**0.5 # Combining errors into one 3D error. * 2.45 to get to ~95% confidence level (2 sigma)
         
         return lat, long, alt, total_error, sog, cog, mag_variation, geo_sep, timestamp
     
@@ -203,6 +256,14 @@ class GPSReceive:
         return None
     
     def setrate(self, rate, measurements_per_nav_solution):
+        """
+        Enables you to set the data output rate from the module.
+        
+        Takes two arguments - the data output rate (Hz), followed by the number of measurements taken per data output.
+        
+        Returns True, False or None depending on whether an ACK, NACK, or nothing was received from the module.
+        """
+        
         measurement_time_delta_ms = int(1000/rate)
         # Packing up the key settings that need changing
         measurement_time_delta_ms = struct.pack("<H", measurement_time_delta_ms)
@@ -222,6 +283,30 @@ class GPSReceive:
         return self._ubx_ack_nack()
         
     def modulesetup(self):
+        """
+        Sets up the module to the settings required for my usage.
+        
+        Only needs to be called once per module, as settings are then saved into battery-backed RAM or the programmable flash
+        Currently, the function works for the NEO-M8N and M8J, will need to be adjusted for the M8M and M8Q to save parameters into the battery-backed RAM instead of programmable flash.
+        
+        Settings configured:
+            - VTG NMEA sentence disabled (contains redundant data)
+            - Module set to airborne with <4g acceleration
+            - 3D fixes only
+                - Initial fix must be 3D
+            - Satellites need to be 15 degrees above horizon to be used for a fix
+            - Minimum satellites for navigation fix is 4
+            - Maximum satellites for navigation fix is 50 (more than the module will realistically be able to see at any time)
+            - Static hold at <20cm/s velocity and within 1m
+            - AssistNow Autonomous enabled
+                - Maximum AssistNow Autonomous orbit error is 20m
+            - Galileo GNSS constellation enabled (as well as default GPS/GLONASS/SBAS)
+            - Enabled interference detection
+                - Broadband detection threshold is 7dB
+                - Continuous wave detection threshold is 20dB
+                - Active antenna
+        """
+        
         # Uses UBX-CFG-MSG sentence to disable the VTG NMEA sentence
         self.gps.write(b'\xb5\x62\x06\x01\x03\x00\xF0\x05\x00\xff\x19')
         flag = self._ubx_ack_nack()
