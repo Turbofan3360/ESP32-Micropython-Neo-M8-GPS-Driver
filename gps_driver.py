@@ -198,7 +198,7 @@ class GPSReceive:
             
             vdop = float(gsa_sentence[-2])
             
-            vertical_error = vdop * 2.5 # 68% confidence level, 1 sigma - estimated accuracy of GPS module is ~2.5m from datasheet
+            vertical_error = vdop * 5 # 68% confidence level, 1 sigma - estimated HORIZONTAL accuracy of GPS module is ~2.5m from datasheet, so vertical accuracy ~4.5-5m
             
             return alt, geo_sep, vertical_error, time_stamp
         
