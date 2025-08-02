@@ -72,7 +72,7 @@ class GPSReceive:
         """
         Returns a list of [latitude, longitude, horizontal error, timestamp] all formatted as strings.
         
-        Latitude/longitude are as degrees, with N/S or E/W
+        Latitude/longitude are as degrees. Latitude - N considered positive, S negative. Longitude - E considered positive, W negative.
         Position error is in meters - fix error in 2D
         Timestamp (UTC) is formatted as hh:mm:ss
         """
@@ -103,12 +103,20 @@ class GPSReceive:
             pos_minutes = gll_sentence[1].find(".")-2
             minutes = float(gll_sentence[1][pos_minutes:])
             degrees = int(gll_sentence[1][:pos_minutes])
-            lat = str(degrees+minutes/60) + gll_sentence[2]
+            
+            if gll_sentence[2] == "E":
+                lat = degrees+minutes/60
+            else:
+                lat = -1*(degrees+minutes/60)
             
             pos_minutes = gll_sentence[3].find(".")-2
             minutes = float(gll_sentence[3][pos_minutes:])
             degrees = int(gll_sentence[3][:pos_minutes])
-            long = str(degrees+minutes/60) + gll_sentence[4]
+            
+            if gll_sentence[4] == "N":
+                long = degrees+minutes/60
+            else:
+                long = -1*(degrees+minutes/60)
             
             # This is the 2D horizontal position error
             hdop = float(gsa_sentence[-3])
@@ -208,7 +216,7 @@ class GPSReceive:
         """
         Returns list of [latitude, longitude, altitude, position error, sog, cog, magnetic variation, geoid separation, timestamp]
         
-        Latitude/longitude are as degrees, with N/S or E/W
+        Latitude/longitude are as degrees. Latitude - N considered positive, S negative. Longitude - E considered positive, W negative.
         Altitude is in meters
         Position error is in meters - the error of the fix in 3D
         SOG is in Knots (Kn)
