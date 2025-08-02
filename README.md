@@ -2,7 +2,7 @@
 
 ### The Code: ###
 
-This code reads data off of a UART pin on the ESP32. The Neo-M8 modules outputs NMEA sentences, which this code then converts into the useful data needed. Note that all outputs are as strings with their correct units. 
+This code reads data off of a UART pin on the ESP32. The Neo-M8 modules outputs NMEA sentences, which this code then converts into the useful data needed.
 
 This code contains a modulesetup() method to configure the GPS module - this only needs to be run once per module. Please see below for details.
 
