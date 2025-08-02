@@ -201,14 +201,14 @@ class GPSReceive:
             return 0, 0, 0, time_stamp
         
         if gga_sentence[6] != "0":
-            alt = gga_sentence[9] + "M AMSL"
-            geo_sep = gga_sentence[11] + "M"
+            alt = gga_sentence[9]
+            geo_sep = gga_sentence[11]
             
             vdop = float(gsa_sentence[-2])
             
             vertical_error = vdop * 5 # 68% confidence level, 1 sigma - estimated HORIZONTAL accuracy of GPS module is ~2.5m from datasheet, so vertical accuracy ~4.5-5m
             
-            return alt, geo_sep, vertical_error, time_stamp
+            return float(alt), float(geo_sep), vertical_error, time_stamp
         
         return 0, 0, 0, time_stamp
     
