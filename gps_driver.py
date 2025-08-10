@@ -50,6 +50,7 @@ class GPSReceive:
         return struct.pack("<B", ck_a), struct.pack("<B", ck_b)
         
     def _update_data(self):
+        sentences = ["GLL", "RMC", "GSV", "GGA", "GSA", "VTG"]
         num_sentences_read = 0
         
         while num_sentences_read < 5:
@@ -64,9 +65,13 @@ class GPSReceive:
             
             if self._checksum(new_data):
                 new_data = new_data.decode('utf-8')
-                self.data[new_data[3:6]] = new_data
+                setence_header = new_data[3:6]
                 
-            num_sentences_read += 1
+                if setence_header in sentences:
+                    sentences.remove(setence_header)
+                    self.data[setence_header] = new_data
+                
+                    num_sentences_read += 1
     
     def position(self):
         """
