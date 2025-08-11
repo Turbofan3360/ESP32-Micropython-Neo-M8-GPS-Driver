@@ -358,9 +358,9 @@ class GPSReceive:
             flag = self._ubx_ack_nack()
         if count == 5 and not flag:
             return
-        
+        print("1")
         count = 0
-        # Using UBX-CFG-NAV5 to set module to: airborne with <4g acceleration, 3D fix only,
+        # Using UBX-CFG-NAV5 to set module to: airborne with <4g acceleration, 3D fix only
         # satellites 15 degrees above horizon to be used for a fix, static hold at <20cm/s and 1m,
         # automatic UTC standard
         packet = b'\x06\x24' + b'$\x00' + b'G\x08' + b'\x08' + b'\x02' + b'\x00\x00\x00\x00' + b'\x00\x00\x00\x00' + b'\x14' + b'\x00' + b'\x00\x00' + b'\x00\x00' + b'\x00\x00' + b'\x00\x00' + b'\x14' + b'\x00' + b'\x00' + b'\x00' + b'\x00' + b'\x01' + b'\x00' + b'\x00\x00\x00\x00\x00\x00\x00'
@@ -378,9 +378,9 @@ class GPSReceive:
             flag = self._ubx_ack_nack()
         if count == 5 and not flag:
             return
-        
+        print("2")
         count = 0
-        # Using UBX-CFG-NAVX5 to set module to: min. satellites for navigation=4
+        # Using UBX-CFG-NAVX5 to set module to: min. satellites for navigation=4,
         # max. satellites for navigation=50, initial fix must be 3D, AssistNow Autonomous turned on,
         # maximum AssistNow Autonomous orbit error=20m
         packet = b'\x06\x23' + b'(\x00' + b'\x00\x00' + b'D@' + b'\x00\x00\x00\x00' + b'\x00\x00' + b'\x04' + b'<' + b'\x00' + b'\x00' + b'\x01' + b'\x00' + b'\x00' + b'\x00\x00' + b'\x00\x00\x00\x00\x00\x00' + b'\x00' + b'\x01' + b'\x00\x00' + b'\x14\x00' + b'\x00\x00\x00\x00' + b'\x00\x00\x00\x00' + b'\x00'
@@ -398,24 +398,28 @@ class GPSReceive:
             flag = self._ubx_ack_nack()
         if count == 5 and not flag:
             return
-        
+        print("3")
         count = 0
+        ### TODO: ENABLE QZSS AS WELL TO PREVENT CROSS CORRELATION ISSUES
         # Constructing UBX-CFG-GNSS message to enable Galileo, GPS, GLONASS, BeiDou, SBAS
-        packet = b'\x06\x3e' + b'\x2c\x00' + b'\x00\x00\xff\x05' + b'\x00\x0a\x10\x00\x01\x00\x01\x01' + b'\x02\x04\x0c\x00\x01\x00\x01\x01' + b'\x06\x06\x0e\x00\x01\x00\x01\x01' + b'\x03\x0a\x10\x00\x01\x00\x01\x01' + b'\x01\x01\x03\x00\x01\x00\x01\x01'
-                                   # Lenth       #payload              # GPS                                 # Galileo                             # GLONASS                             # BeiDou                              # SBAS
+        packet = b'\x06\x3e' + b'\x2c\x00' + b'\x00\x00\xff\x05' + b'\x00\x08\x10\x00\x00\x01\x00\x01' + b'\x01\x01\x03\x00\x00\x01\x00\x01' + b'\x02\x02\x08\x00\x00\x01\x00\x01' + b'\x03\x08\x0e\x00\x00\x01\x00\x01' + b'\x06\x06\x0e\x00\x00\x01\x00\x01'
+                               # Lenth       #payload              # GPS                                 # SBAS                                # Galileo                             # BeiDou                              # GLONASS
         ck_a, ck_b = self._ubx_checksum(packet)
         packet = b'\xb5\x62' + packet + ck_a + ck_b
         self.gps.write(packet)
         flag = self._ubx_ack_nack()
+        time.sleep(0.5)
         
         while not flag and count < 5:
-            time.sleep(0.5)
             count += 1
             
             self.gps.write(packet)
             flag = self._ubx_ack_nack()
+            time.sleep(0.5)
         if count == 5 and not flag:
             return
+        print("4")
+        self.gnss_start()
         
         count = 0
         # Constructing UBX-CFG-ITFM message to configure interference/jamming monitoring on the module
@@ -435,7 +439,7 @@ class GPSReceive:
             flag = self._ubx_ack_nack()
         if count == 5 and not flag:
             return
-        
+        print("5")
         count = 0
         # Constructing UBX-CFG-CFG message: saving all the above configured settings into the module's programmable flash
         # This should be changed to saving into battery-backed RAM for NEO-M8Q and NEO-M8M which don't have programmable flash
@@ -455,7 +459,7 @@ class GPSReceive:
             flag = self._ubx_ack_nack()
         if count == 5 and not flag:
             return
-        
+        print("6")
         count = 0
         
         # UBX-CFG-RST message to do a complete hardware reset to the module
