@@ -54,7 +54,7 @@ To initialise the driver - the parameters the driver expects is the ESP32 pin th
  - Static hold at <20cm/s velocity and within 1m
  - AssistNow Autonomous enabled
      - Maximum AssistNow Autonomous orbit error is 20m
- - Galileo GNSS constellation enabled (as well as default GPS/GLONASS/SBAS)
+ - GNSS constellations enabled - Galileo, GPS, GLONASS, BeiDou, SBAS
  - Enabled interference detection
      - Broadband detection threshold is 7dB
      - Continuous wave detection threshold is 20dB
