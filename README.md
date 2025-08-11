@@ -10,6 +10,8 @@ As standard, the module updates its navigation fixes at a rate of 1Hz. This can 
 
 The getdata() method is an aggregator - it calls the other methods (ensuring that they only process the NMEA sentences from one data frame). This returns all the data you can get from the module - including a combined, 3D position error to a 2σ confidence level. Other errors (returned from the position and altitude methods) are only to a 1σ confidence level.
 
+You can also call gnss_stop() and gnss_start() to stop/start the module's GNSS systems. gnss_stop() should be called before pulling the module's power, and these commands can also be used to reduce the module's power consumption when necessary.
+
 If there are any issues with the data (i.e. the code can't process it), integer zeros will be returned for those values.
 
 ### Example Usage: ###
