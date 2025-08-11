@@ -279,22 +279,20 @@ class GPSReceive:
         return
     
     def _ubx_ack_nack(self):
-        start = time.time()
-        data = b''
+        start = time.time_ns()
+        self.ackdata = b''
         
-        while time.time() < start+1:
-            if self.gps.any() >= 10:
-                data += self.gps.read()
+        while time.time_ns() < start+1000000000:
+            if self.gps.any():
+                self.ackdata += self.gps.read()
                 
-                index = data.find(b'\xb5\x62\x05')
-                if index != -1:
-                    data = data[index:]
-                    
-                    if len(data) >= 4:
-                        if data[3] == 0x01:
-                            return True
-                        if data[3] == 0x00:
-                            return False
+                index_ack = self.ackdata.find(b'\xb5\x62\x05\x01')
+                index_nack = self.ackdata.find(b'\xb5\x62\x05\x00')
+                
+                if index_ack != -1:
+                    return True
+                if index_nack != -1:
+                    return False
         return None
     
     def setrate(self, rate, measurements_per_nav_solution):
