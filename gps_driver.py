@@ -313,69 +313,132 @@ class GPSReceive:
             - Static hold at <20cm/s velocity and within 1m
             - AssistNow Autonomous enabled
                 - Maximum AssistNow Autonomous orbit error is 20m
-            - Galileo GNSS constellation enabled (as well as default GPS/GLONASS/SBAS)
+            - GNSS constellations enabled - Galileo, GPS, GLONASS, BeiDou, SBAS
             - Enabled interference detection
                 - Broadband detection threshold is 7dB
                 - Continuous wave detection threshold is 20dB
                 - Active antenna
         """
-        
+        count = 0
         # Uses UBX-CFG-MSG sentence to disable the VTG NMEA sentence
         self.gps.write(b'\xb5\x62\x06\x01\x03\x00\xF0\x05\x00\xff\x19')
         flag = self._ubx_ack_nack()
+        while not flag and count < 5:
+            time.sleep(0.5)
+            count += 1
+            
+            self.gps.write(b'\xb5\x62\x06\x01\x03\x00\xF0\x05\x00\xff\x19')
+            flag = self._ubx_ack_nack()
+        if count == 5 and not flag:
+            return
         
-        if flag:
-            # Using UBX-CFG-NAV5 to set module to: airborne with <4g acceleration, 3D fix only, satellites 15 degrees above horizon to be used for a fix, static hold at <20cm/s and 1m, automatic UTC standard
-            packet = b'\x06\x24' + b'$\x00' + b'G\x08' + b'\x08' + b'\x02' + b'\x00\x00\x00\x00' + b'\x00\x00\x00\x00' + b'\x14' + b'\x00' + b'\x00\x00' + b'\x00\x00' + b'\x00\x00' + b'\x00\x00' + b'\x14' + b'\x00' + b'\x00' + b'\x00' + b'\x00' + b'\x01' + b'\x00' + b'\x00\x00\x00\x00\x00\x00\x00'
+        count = 0
+        # Using UBX-CFG-NAV5 to set module to: airborne with <4g acceleration, 3D fix only,
+        # satellites 15 degrees above horizon to be used for a fix, static hold at <20cm/s and 1m,
+        # automatic UTC standard
+        packet = b'\x06\x24' + b'$\x00' + b'G\x08' + b'\x08' + b'\x02' + b'\x00\x00\x00\x00' + b'\x00\x00\x00\x00' + b'\x14' + b'\x00' + b'\x00\x00' + b'\x00\x00' + b'\x00\x00' + b'\x00\x00' + b'\x14' + b'\x00' + b'\x00' + b'\x00' + b'\x00' + b'\x01' + b'\x00' + b'\x00\x00\x00\x00\x00\x00\x00'
 
-            ck_a, ck_b = self._ubx_checksum(packet)
-            packet = b'\xb5\x62' + packet + ck_a + ck_b
-            self.gps.write(packet)
+        ck_a, ck_b = self._ubx_checksum(packet)
+        packet = b'\xb5\x62' + packet + ck_a + ck_b
+        self.gps.write(packet)
+        flag = self._ubx_ack_nack()
         
-            flag = self._ubx_ack_nack()
+        while not flag and count < 5:
+            time.sleep(0.5)
+            count += 1
             
-        if flag:
-            # Using UBX-CFG-NAVX5 to set module to: min. satellites for navigation=4, max. satellites for navigation=50, initial fix must be 3D, AssistNow Autonomous turned on, maximum AssistNow Autonomous orbit error=20m
-            packet = b'\x06\x23' + b'(\x00' + b'\x00\x00' + b'D@' + b'\x00\x00\x00\x00' + b'\x00\x00' + b'\x04' + b'<' + b'\x00' + b'\x00' + b'\x01' + b'\x00' + b'\x00' + b'\x00\x00' + b'\x00\x00\x00\x00\x00\x00' + b'\x00' + b'\x01' + b'\x00\x00' + b'\x14\x00' + b'\x00\x00\x00\x00' + b'\x00\x00\x00\x00' + b'\x00'
+            self.gps.write(packet)
+            flag = self._ubx_ack_nack()
+        if count == 5 and not flag:
+            return
         
-            ck_a, ck_b = self._ubx_checksum(packet)
-            packet = b'\xb5\x62' + packet + ck_a + ck_b
-            self.gps.write(packet)
-            
-            flag = self._ubx_ack_nack()
+        count = 0
+        # Using UBX-CFG-NAVX5 to set module to: min. satellites for navigation=4
+        # max. satellites for navigation=50, initial fix must be 3D, AssistNow Autonomous turned on,
+        # maximum AssistNow Autonomous orbit error=20m
+        packet = b'\x06\x23' + b'(\x00' + b'\x00\x00' + b'D@' + b'\x00\x00\x00\x00' + b'\x00\x00' + b'\x04' + b'<' + b'\x00' + b'\x00' + b'\x01' + b'\x00' + b'\x00' + b'\x00\x00' + b'\x00\x00\x00\x00\x00\x00' + b'\x00' + b'\x01' + b'\x00\x00' + b'\x14\x00' + b'\x00\x00\x00\x00' + b'\x00\x00\x00\x00' + b'\x00'
         
-        if 	flag:
-            # Constructing UBX-CFG-GNSS message to enable Galileo GNSS constellation use as well as standard GPS/GLONASS/SBAS
-            packet = b'\x06\x3e' + b'\x0c\x00' + b'\x00\x00\xff\x01' + b'\x02\x02\x08\x00\x01\x00\x10\x00'
-            
-            ck_a, ck_b = self._ubx_checksum(packet)
-            packet = b'\xb5\x62' + packet + ck_a + ck_b
-            self.gps.write(packet)
-            
-            flag = self._ubx_ack_nack()
+        ck_a, ck_b = self._ubx_checksum(packet)
+        packet = b'\xb5\x62' + packet + ck_a + ck_b
+        self.gps.write(packet)
+        flag = self._ubx_ack_nack()
         
-        if flag:
-            # Constructing UBX-CFG-ITFM message to configure interference/jamming monitoring on the module - enabling interference detection, broadband threshold=7dB, continuous wave threshold=20dB, active antenna
-            packet = b'\x06\x39' + b'\x08\x00' + b'\xadb\xadG' + b'\x00\x00#\x1e'
+        while not flag and count < 5:
+            time.sleep(0.5)
+            count += 1
             
-            ck_a, ck_b = self._ubx_checksum(packet)
-            packet = b'\xb5\x62' + packet + ck_a + ck_b
             self.gps.write(packet)
-            
             flag = self._ubx_ack_nack()
+        if count == 5 and not flag:
+            return
+        
+        count = 0
+        # Constructing UBX-CFG-GNSS message to enable Galileo, GPS, GLONASS, BeiDou, SBAS
+        packet = b'\x06\x3e' + b'\x2c\x00' + b'\x00\x00\xff\x05' + b'\x00\x0a\x10\x00\x01\x00\x01\x01' + b'\x02\x04\x0c\x00\x01\x00\x01\x01' + b'\x06\x06\x0e\x00\x01\x00\x01\x01' + b'\x03\x0a\x10\x00\x01\x00\x01\x01' + b'\x01\x01\x03\x00\x01\x00\x01\x01'
+                                   # Lenth       #payload              # GPS                                 # Galileo                             # GLONASS                             # BeiDou                              # SBAS
+        ck_a, ck_b = self._ubx_checksum(packet)
+        packet = b'\xb5\x62' + packet + ck_a + ck_b
+        self.gps.write(packet)
+        flag = self._ubx_ack_nack()
+        
+        while not flag and count < 5:
+            time.sleep(0.5)
+            count += 1
             
-        if flag:
-            # Constructing UBX-CFG-CFG message: saving all the above configured settings into the module's programmable flash
-            # This should be changed to saving into battery-backed RAM for NEO-M8Q and NEO-M8M which don't have programmable flash - do this by changing the byte b'\x02' below for the byte b'\x01' (assuming you have BBR, unless you want to save it into the SPI Flash)
-            packet = b'\x06\x09' + b'\r\x00' + b'\x00\x00\x00\x00' + b'\x00\x00\x00\x1a' + b'\x00\x00\x00\x00' + b'\x02'
-            
-            ck_a, ck_b = self._ubx_checksum(packet)
-            packet = b'\xb5\x62' + packet + ck_a + ck_b
             self.gps.write(packet)
-            
             flag = self._ubx_ack_nack()
+        if count == 5 and not flag:
+            return
+        
+        count = 0
+        # Constructing UBX-CFG-ITFM message to configure interference/jamming monitoring on the module
+        # Enabling interference detection, broadband threshold=7dB, continuous wave threshold=20dB, active antenna
+        packet = b'\x06\x39' + b'\x08\x00' + b'\xadb\xadG' + b'\x00\x00#\x1e'
             
-        return flag
+        ck_a, ck_b = self._ubx_checksum(packet)
+        packet = b'\xb5\x62' + packet + ck_a + ck_b
+        self.gps.write(packet)
+        flag = self._ubx_ack_nack()
+        
+        while not flag and count < 5:
+            time.sleep(0.5)
+            count += 1
+            
+            self.gps.write(packet)
+            flag = self._ubx_ack_nack()
+        if count == 5 and not flag:
+            return
+        
+        count = 0
+        # Constructing UBX-CFG-CFG message: saving all the above configured settings into the module's programmable flash
+        # This should be changed to saving into battery-backed RAM for NEO-M8Q and NEO-M8M which don't have programmable flash
+        # Do this by changing the byte b'\x02' below for the byte b'\x01' (assuming you have BBR, unless you want to save it into the SPI Flash)
+        packet = b'\x06\x09' + b'\x0d\x00' + b'\x00\x00\x00\x00' + b'\x00\x00\x00\x1a' + b'\x00\x00\x00\x00' + b'\x02'
+            
+        ck_a, ck_b = self._ubx_checksum(packet)
+        packet = b'\xb5\x62' + packet + ck_a + ck_b
+        self.gps.write(packet)
+        flag = self._ubx_ack_nack()
+        
+        while not flag and count < 5:
+            time.sleep(0.5)
+            count += 1
+            
+            self.gps.write(packet)
+            flag = self._ubx_ack_nack()
+        if count == 5 and not flag:
+            return
+        
+        count = 0
+        
+        # UBX-CFG-RST message to do a complete hardware reset to the module
+        packet = b'\x06\x04' + b'\x04\x00' + b'\xff\xff' + b'\x00' + b'\x00'
+            
+        ck_a, ck_b = self._ubx_checksum(packet)
+        packet = b'\xb5\x62' + packet + ck_a + ck_b
+        self.gps.write(packet)
+
+        return True
 
 
 if __name__ == "__main__":
