@@ -248,6 +248,35 @@ class GPSReceive:
         total_error = 2.45 * (position_error*position_error + vertical_error*vertical_error)**0.5 # Combining errors into one 3D error. * 2.45 to get to ~95% confidence level (2 sigma)
         
         return lat, long, alt, total_error, sog, cog, mag_variation, geo_sep, timestamp
+
+    def gnss_stop(self):
+        """
+        Softly shuts down the module's GNSS systems.
+        Can be called to reduce power usage on the module.
+        
+        Should be called before pulling the power.
+        """
+        # UBX-CFG-RST message
+        packet = b'\x06\x04' + b'\x04\x00' + b'\x00\x00' + b'\x08' + b'\x00'
+            
+        ck_a, ck_b = self._ubx_checksum(packet)
+        packet = b'\xb5\x62' + packet + ck_a + ck_b
+        self.gps.write(packet)
+        
+        return
+    
+    def gnss_start(self):
+        """
+        Softly starts up the module's GNSS systems.
+        """
+        # UBX-CFG-RST message
+        packet = b'\x06\x04' + b'\x04\x00' + b'\x00\x00' + b'\x09' + b'\x00'
+            
+        ck_a, ck_b = self._ubx_checksum(packet)
+        packet = b'\xb5\x62' + packet + ck_a + ck_b
+        self.gps.write(packet)
+        
+        return
     
     def _ubx_ack_nack(self):
         start = time.time()
