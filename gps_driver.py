@@ -109,7 +109,7 @@ class GPSReceive:
             minutes = float(gll_sentence[1][pos_minutes:])
             degrees = int(gll_sentence[1][:pos_minutes])
             
-            if gll_sentence[2] == "E":
+            if gll_sentence[2] == "N":
                 lat = degrees+minutes/60
             else:
                 lat = -1*(degrees+minutes/60)
@@ -118,7 +118,7 @@ class GPSReceive:
             minutes = float(gll_sentence[3][pos_minutes:])
             degrees = int(gll_sentence[3][:pos_minutes])
             
-            if gll_sentence[4] == "N":
+            if gll_sentence[4] == "E":
                 long = degrees+minutes/60
             else:
                 long = -1*(degrees+minutes/60)
