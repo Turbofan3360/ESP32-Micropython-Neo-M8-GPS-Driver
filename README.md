@@ -38,7 +38,7 @@ lat, long, position_error, time_stamp = module.position()
 sog, cog, mag_variation, time_stamp = module.velocity()
 alt, geo_sep, vertical_error, time_stamp = module.altitude()
 
-lat, long, alt, total_error, sog, cog, mag_variation, geo_sep, timestamp = module.get_data()
+lat, long, position_error, alt, vertical_error, sog, cog, mag_variation, geo_sep, timestamp = module.get_data()
 
 ```
 
