@@ -244,10 +244,8 @@ class GPSReceive:
             timestamp = timestamp_2
         else:
             timestamp = 0
-        
-        total_error = 2.45 * (position_error*position_error + vertical_error*vertical_error)**0.5 # Combining errors into one 3D error. * 2.45 to get to ~95% confidence level (2 sigma)
-        
-        return lat, long, alt, total_error, sog, cog, mag_variation, geo_sep, timestamp
+                
+        return lat, long, position_error, alt, vertical_error, sog, cog, mag_variation, geo_sep, timestamp
 
     def gnss_stop(self):
         """
