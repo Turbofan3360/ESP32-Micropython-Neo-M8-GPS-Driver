@@ -477,5 +477,5 @@ if __name__ == "__main__":
         flag = gps.setrate(2, 3)
     
     while True:
-        lat, long, alt, total_error, sog, cog, mag_variation, geo_sep, timestamp = gps.getdata()
-        print(lat, long, alt, total_error, sog, cog, mag_variation, geo_sep, timestamp)
+        lat, long, poserror, alt, verror, sog, cog, mag_variation, geo_sep, timestamp = gps.getdata()
+        print(lat, long, poserror, alt, verror, sog, cog, mag_variation, geo_sep, timestamp)
