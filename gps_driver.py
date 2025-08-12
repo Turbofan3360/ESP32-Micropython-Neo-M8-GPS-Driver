@@ -400,7 +400,6 @@ class GPSReceive:
             return
         print("3")
         count = 0
-        ### TODO: ENABLE QZSS AS WELL TO PREVENT CROSS CORRELATION ISSUES
         # Constructing UBX-CFG-GNSS message to enable Galileo, GPS, GLONASS, BeiDou, SBAS
         packet = b'\x06\x3e' + b'\x2c\x00' + b'\x00\x00\xff\x05' + b'\x00\x08\x10\x00\x00\x01\x00\x01' + b'\x01\x01\x03\x00\x00\x01\x00\x01' + b'\x02\x02\x08\x00\x00\x01\x00\x01' + b'\x03\x08\x0e\x00\x00\x01\x00\x01' + b'\x06\x06\x0e\x00\x00\x01\x00\x01'
                                # Lenth       #payload              # GPS                                 # SBAS                                # Galileo                             # BeiDou                              # GLONASS
