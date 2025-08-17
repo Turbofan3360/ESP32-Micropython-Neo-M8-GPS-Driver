@@ -13,6 +13,9 @@ class GPSReceive:
             velocity() - Gets velocity information
             altitude() - Gets altitude information
             getdata() - Aggregator of the previous methods
+            gnss_start() - Starts the module's GNSS system
+            gnss_stop() - Softly stops the module's GNSS system
+            update_buffer() - reads from the  ESP32 UART RX buffer into the driver's buffer (fixed to the most recent 512 bytes). This enables a speed-up of the reading process if called periodically.
             
             setrate(rate, measurements per nav solution) - Enables you to set the rate of data output from the module
             modulesetup() - Sets up the module to the settings required for my usage. Can be adapted to suit other uses. For the NEO-M8N and NEO-M8Q, this will need to be adjusted slightly. See the method for details.
@@ -23,6 +26,7 @@ class GPSReceive:
         self.gps = UART(2, baudrate=9600, tx=tx_pin, rx=rx_pin)
         
         self.data = {}
+        self.background_buffer = bytearray()
     
     def _checksum(self, nmea_sentence):
         checksum = 0
@@ -48,27 +52,32 @@ class GPSReceive:
         ck_b &= 0xFF
         
         return struct.pack("<B", ck_a), struct.pack("<B", ck_b)
-        
+    
+    def update_buffer(self):
+        if self.gps.any():
+            self.background_buffer += self.gps.read()
+            
+            length = len(self.background_buffer)
+            if length > 512:
+                self.background_buffer = self.background_buffer[length-512:]
+    
     def _update_data(self):
-        def _update_data(self):
-        bytes_data = b''
         end_pos = -1
         start_pos = -1
         sentences_read = 0
         
         while sentences_read < 5:
-            if self.gps.any():
-                bytes_data += self.gps.read()
+            self.update_buffer()
             
             while sentences_read < 5:
-                start_pos = bytes_data.find(b'$')
-                end_pos = bytes_data.find(b'\n', start_pos)
+                start_pos = self.background_buffer.find(b'$')
+                end_pos = self.background_buffer.find(b'\n', start_pos)
                 
                 if start_pos == -1 or end_pos == -1:
                     break
             
-                data_section = bytes_data[start_pos:end_pos+1]
-                bytes_data = bytes_data[end_pos+1:]
+                data_section = self.background_buffer[start_pos:end_pos+1]
+                self.background_buffer = self.background_buffer[end_pos+1:]
                 
                 if self._checksum(data_section):
                     try:
@@ -116,7 +125,7 @@ class GPSReceive:
             minutes = float(gll_sentence[1][pos_minutes:])
             degrees = int(gll_sentence[1][:pos_minutes])
             
-            if gll_sentence[2] == "N":
+            if gll_sentence[2] == "E":
                 lat = degrees+minutes/60
             else:
                 lat = -1*(degrees+minutes/60)
@@ -125,7 +134,7 @@ class GPSReceive:
             minutes = float(gll_sentence[3][pos_minutes:])
             degrees = int(gll_sentence[3][:pos_minutes])
             
-            if gll_sentence[4] == "E":
+            if gll_sentence[4] == "N":
                 long = degrees+minutes/60
             else:
                 long = -1*(degrees+minutes/60)
@@ -251,9 +260,28 @@ class GPSReceive:
             timestamp = timestamp_2
         else:
             timestamp = 0
+        
+        total_error = 2.45 * (position_error*position_error + vertical_error*vertical_error)**0.5 # Combining errors into one 3D error. * 2.45 to get to ~95% confidence level (2 sigma)
+        
+        return lat, long, alt, total_error, sog, cog, mag_variation, geo_sep, timestamp
+    
+    def _ubx_ack_nack(self):
+        start = time.time_ns()
+        self.ackdata = b''
+        
+        while time.time_ns() < start+1000000000:
+            if self.gps.any():
+                self.ackdata += self.gps.read()
                 
-        return lat, long, position_error, alt, vertical_error, sog, cog, mag_variation, geo_sep, timestamp
-
+                index_ack = self.ackdata.find(b'\xb5\x62\x05\x01')
+                index_nack = self.ackdata.find(b'\xb5\x62\x05\x00')
+                
+                if index_ack != -1:
+                    return True
+                if index_nack != -1:
+                    return False
+        return None
+    
     def gnss_stop(self):
         """
         Softly shuts down the module's GNSS systems.
@@ -282,24 +310,7 @@ class GPSReceive:
         self.gps.write(packet)
         
         return
-    
-    def _ubx_ack_nack(self):
-        start = time.time_ns()
-        self.ackdata = b''
         
-        while time.time_ns() < start+1000000000:
-            if self.gps.any():
-                self.ackdata += self.gps.read()
-                
-                index_ack = self.ackdata.find(b'\xb5\x62\x05\x01')
-                index_nack = self.ackdata.find(b'\xb5\x62\x05\x00')
-                
-                if index_ack != -1:
-                    return True
-                if index_nack != -1:
-                    return False
-        return None
-    
     def setrate(self, rate, measurements_per_nav_solution):
         """
         Enables you to set the data output rate from the module.
@@ -383,7 +394,7 @@ class GPSReceive:
             flag = self._ubx_ack_nack()
         if count == 5 and not flag:
             return
-
+        
         count = 0
         # Using UBX-CFG-NAVX5 to set module to: min. satellites for navigation=4,
         # max. satellites for navigation=50, initial fix must be 3D, AssistNow Autonomous turned on,
@@ -403,7 +414,7 @@ class GPSReceive:
             flag = self._ubx_ack_nack()
         if count == 5 and not flag:
             return
-            
+        
         count = 0
         # Constructing UBX-CFG-GNSS message to enable Galileo, GPS, GLONASS, BeiDou, SBAS
         packet = b'\x06\x3e' + b'\x2c\x00' + b'\x00\x00\xff\x05' + b'\x00\x08\x10\x00\x00\x01\x00\x01' + b'\x01\x01\x03\x00\x00\x01\x00\x01' + b'\x02\x02\x08\x00\x00\x01\x00\x01' + b'\x03\x08\x0e\x00\x00\x01\x00\x01' + b'\x06\x06\x0e\x00\x00\x01\x00\x01'
@@ -422,7 +433,7 @@ class GPSReceive:
             time.sleep(0.5)
         if count == 5 and not flag:
             return
-            
+        
         self.gnss_start()
         
         count = 0
@@ -443,7 +454,7 @@ class GPSReceive:
             flag = self._ubx_ack_nack()
         if count == 5 and not flag:
             return
-            
+        
         count = 0
         # Constructing UBX-CFG-CFG message: saving all the above configured settings into the module's programmable flash
         # This should be changed to saving into battery-backed RAM for NEO-M8Q and NEO-M8M which don't have programmable flash
@@ -463,7 +474,7 @@ class GPSReceive:
             flag = self._ubx_ack_nack()
         if count == 5 and not flag:
             return
-            
+        
         count = 0
         
         # UBX-CFG-RST message to do a complete hardware reset to the module
@@ -477,12 +488,16 @@ class GPSReceive:
 
 
 if __name__ == "__main__":
-    gps = GPSReceive(10, 9)
+    gps = GPSReceive(20, 21)
+    
+    flag=gps.modulesetup()
+    while not flag:
+        flag=gps.modulesetup()
     
     flag = gps.setrate(2, 3)
     while not flag:
         flag = gps.setrate(2, 3)
     
     while True:
-        lat, long, poserror, alt, verror, sog, cog, mag_variation, geo_sep, timestamp = gps.getdata()
-        print(lat, long, poserror, alt, verror, sog, cog, mag_variation, geo_sep, timestamp)
+        lat, long, alt, total_error, sog, cog, mag_variation, geo_sep, timestamp = gps.getdata()
+        print(lat, long, alt, total_error, sog, cog, mag_variation, geo_sep, timestamp)
