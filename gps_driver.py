@@ -50,28 +50,35 @@ class GPSReceive:
         return struct.pack("<B", ck_a), struct.pack("<B", ck_b)
         
     def _update_data(self):
-        sentences = ["GLL", "RMC", "GSV", "GGA", "GSA", "VTG"]
-        num_sentences_read = 0
+        def _update_data(self):
+        bytes_data = b''
+        end_pos = -1
+        start_pos = -1
+        sentences_read = 0
         
-        while num_sentences_read < 5:
-            new_data = self.gps.read(1)
-            while new_data != b'$':
-                new_data = self.gps.read(1)
+        while sentences_read < 5:
+            if self.gps.any():
+                bytes_data += self.gps.read()
             
-            while not new_data[-1:] == b'\n':
-                data_byte = self.gps.read(1)
-                if data_byte:
-                    new_data += data_byte
+            while sentences_read < 5:
+                start_pos = bytes_data.find(b'$')
+                end_pos = bytes_data.find(b'\n', start_pos)
+                
+                if start_pos == -1 or end_pos == -1:
+                    break
             
-            if self._checksum(new_data):
-                new_data = new_data.decode('utf-8')
-                setence_header = new_data[3:6]
+                data_section = bytes_data[start_pos:end_pos+1]
+                bytes_data = bytes_data[end_pos+1:]
                 
-                if setence_header in sentences:
-                    sentences.remove(setence_header)
-                    self.data[setence_header] = new_data
+                if self._checksum(data_section):
+                    try:
+                        data_section = data_section.decode('utf-8')
+                    except UnicodeError:
+                        break
                 
-                    num_sentences_read += 1
+                    sentence_header = data_section[3:6]
+                    self.data[sentence_header] = data_section
+                    sentences_read += 1
     
     def position(self):
         """
