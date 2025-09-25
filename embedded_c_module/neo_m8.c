@@ -25,10 +25,15 @@ mp_obj_t neo_m8_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, 
 	self->uart_bus = args[0];
 	self->buffer_len = 0;
 
+	self->data.gll = NULL;
+	self->data.gsa = NULL;
+	self->data.gga = NULL;
+	self->data.rmc = NULL;
+
 	return MP_OBJ_FROM_PTR(self);
 }
 
-static int16_t find_in_char_array(char *array, uint16_t length, char character_to_look_for, int16_t starting_point){
+static int16_t find_in_char_array(char *array, uint16_t length, char character_to_look_for, uint16_t starting_point){
 	uint16_t i;
 
 	// Making sure the starting point is valid - some cases mean that starting_point might be passed in as -1
@@ -74,51 +79,84 @@ static void update_data(neo_m8_obj_t *self){
 
 	uint8_t sentences_read = 0;
 	int16_t start_pos = -1, end_pos = -1;
-	char *nmea_sentence_type[3]
+	char nmea_sentence_type[4];
 
 	while (sentences_read < 5){
-		update_buffer(self_mp);
+		start_pos = find_in_char_array(self->buffer, self->buffer_len, '$', 0);
+		end_pos = find_in_char_array(self->buffer, self->buffer_len, '\n', start_pos);
 
-		while (sentences_read < 5){
-			start_pos = find_in_char_array(self->buffer, self->buffer_len, '$', 0);
-			end_pos = find_in_char_array(self->buffer, self->buffer_len, '\n', start_pos);
-
-			if ((start_pos == -1) || (end_pos == -1)){
-				break;
-			}
-
-			// Allocating memory to and copying the NMEA sentence it's found into a temporary variable
-			char *data_section = (char *) malloc((end_pos - start_pos)*CHAR_SIZE);
-			strncpy(data_section, self->buffer + start_pos, end_pos - start_pos);
-
-			// Removing the section of the buffer used by the data_section NMEA sentence
-			memmove(self->buffer, self->buffer + end_pos, self->buffer_len - end_pos);
-			self->buffer_len -= end_pos
-
-			// Checking the NMEA checksum
-			if (nmea_checksum(data_section, end_pos-start_pos) == 0){
-				break;
-			}
-
-			// Finding the type of NMEA sentence it is, then saving it into memory
-			strncpy(nmea_sentence_type, data_section[1], 3);
-
-			if (nmea_sentence_type == "GLL"){
-				self->data->gll = *data_section;
-			}
-			else if(nmea_sentence_type = "GSA"){
-				self->data->gsa = *data_section;
-			}
-			else if(nmea_sentence_type = "GGA"){
-				self->data->gga = *data_section;
-			}
-			else if(nmea_sentence_type = "RMC"){
-				self->data->rmc = *data_section;
-			}
-
-			sentences_read++;
-			free(data_section);
+		if ((start_pos == -1) || (end_pos == -1)){
+			update_buffer(self_mp);
+			continue;
 		}
+
+		// Allocating memory to and copying the NMEA sentence it's found into a temporary variable
+		size_t sentence_length = end_pos - start_pos;
+		char *data_section = (char *) malloc(sentence_length*CHAR_SIZE + 1);
+		strncpy(data_section, self->buffer + start_pos, sentence_length);
+		data_section[sentence_length] = '\0';
+
+		// Removing the section of the buffer used by the data_section NMEA sentence
+		memmove(self->buffer, self->buffer + end_pos, self->buffer_len - end_pos);
+		self->buffer_len -= end_pos;
+
+		// Checking the NMEA checksum
+		if (nmea_checksum(data_section, end_pos-start_pos) == 0){
+			continue;
+		}
+
+		// Finding the type of NMEA sentence it is, then saving it into memory
+		strncpy(nmea_sentence_type, data_section + 1, 3);
+		nmea_sentence_type[3] = '\0';
+		size_t str_length = strlen(data_section);
+
+		if (strcmp(nmea_sentence_type, "GLL") == 0){
+			self->data.gll = realloc(self->data.gll, str_length*CHAR_SIZE + 1);
+
+			if (self->data.gll == NULL){
+				// Error: out of memory
+				mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
+			}
+
+			strncpy(self->data.gll, data_section, str_length);
+			self->data.gll[str_length] = '\0';
+		}
+		else if(strcmp(nmea_sentence_type, "GSA") == 0){
+			self->data.gsa = realloc(self->data.gsa, str_length*CHAR_SIZE + 1);
+
+			if (self->data.gsa == NULL){
+				// Error: out of memory
+				mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
+			}
+
+			strncpy(self->data.gsa, data_section, str_length);
+			self->data.gsa[str_length] = '\0';
+		}
+		else if(strcmp(nmea_sentence_type, "GGA") == 0){
+			self->data.gga = realloc(self->data.gga, str_length*CHAR_SIZE + 1);
+
+			if (self->data.gga == NULL){
+				// Error: out of memory
+				mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
+			}
+
+			strncpy(self->data.gga, data_section, str_length);
+			self->data.gga[str_length] = '\0';
+		}
+		else if(strcmp(nmea_sentence_type, "RMC") == 0){
+			self->data.rmc = realloc(self->data.rmc, str_length*CHAR_SIZE + 1);
+
+			if (self->data.rmc == NULL){
+				// Error: out of memory
+				mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
+			}
+
+			strncpy(self->data.rmc, data_section, str_length);
+			self->data.rmc[str_length] = '\0';
+		}
+
+		sentences_read++;
+		free(data_section);
 	}
 }
 

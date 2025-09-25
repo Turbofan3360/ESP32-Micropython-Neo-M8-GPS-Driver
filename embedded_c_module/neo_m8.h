@@ -16,10 +16,10 @@
 
 // Struct to store the NMEA sentences read from the module
 typedef struct {
-	char gll = NULL;
-	char gsa = NULL;
-	char gga = NULL;
-	char rmc = NULL;
+	char *gll;
+	char *gsa;
+	char *gga;
+	char *rmc;
 } nmea_sentences_data;
 
 // Object definition
@@ -34,7 +34,7 @@ typedef struct {
 } neo_m8_obj_t;
 
 // Function declarations
-static uint16_t find_in_char_array(char *array, uint16_t length, char character_to_look_for, uint16_t starting_point);
+static int16_t find_in_char_array(char *array, uint16_t length, char character_to_look_for, uint16_t starting_point);
 static uint8_t nmea_checksum(char *nmea_sentence, uint8_t length);
 static void update_data(neo_m8_obj_t *self);
 
