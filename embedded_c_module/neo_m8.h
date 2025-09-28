@@ -34,8 +34,10 @@ typedef struct {
 } neo_m8_obj_t;
 
 // Function declarations
-static int16_t find_in_char_array(char *array, uint16_t length, char character_to_look_for, uint16_t starting_point);
+static int16_t find_in_char_array(char *array, uint16_t length, char character_to_look_for, int16_t starting_point);
 static uint8_t nmea_checksum(char *nmea_sentence, uint8_t length);
+static char* extract_timestamp(char *nmea_section);
+static float extract_lat_long(char *nmea_section);
 static void update_data(neo_m8_obj_t *self);
 
 extern const mp_obj_type_t neo_m8_type;

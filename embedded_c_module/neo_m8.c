@@ -33,7 +33,7 @@ mp_obj_t neo_m8_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, 
 	return MP_OBJ_FROM_PTR(self);
 }
 
-static int16_t find_in_char_array(char *array, uint16_t length, char character_to_look_for, uint16_t starting_point){
+static int16_t find_in_char_array(char *array, uint16_t length, char character_to_look_for, int16_t starting_point){
 	uint16_t i;
 
 	// Making sure the starting point is valid - some cases mean that starting_point might be passed in as -1
@@ -52,7 +52,8 @@ static int16_t find_in_char_array(char *array, uint16_t length, char character_t
 }
 
 static uint8_t nmea_checksum(char *nmea_sentence, uint8_t length){
-	uint8_t i, checksum_pos, checksum_calc, checksum_sentence;
+	int16_t checksum_pos;
+	uint8_t i checksum_calc, checksum_sentence;
 
 	// Finding where the checksum starts
 	checksum_pos = find_in_char_array(nmea_sentence, length, '*', 0);
@@ -160,6 +161,61 @@ static void update_data(neo_m8_obj_t *self){
 	}
 }
 
+static char* extract_timestamp(char *nmea_section){
+	static char timestamp[9];
+
+	timestamp[0] = nmea_section[0];
+	timestamp[1] = nmea_section[1];
+	timestamp[2] = ':';
+	timestamp[3] = nmea_section[2];
+	timestamp[4] = nmea_section[3];
+	timestamp[5] = ':';
+	timestamp[6] = nmea_section[4];
+	timestamp[7] = nmea_section[5];
+	timestamp[8] = '\0';
+
+	return timestamp;
+}
+
+static float extract_lat_long(char *nmea_section){
+	uint8_t i;
+	int8_t pos_degrees_end, degrees;
+	float minutes, total;
+
+	// Finding the end of the degrees part of the lat/long string
+	pos_degrees_end = find_in_char_array(nmea_section, strlen(nmea_section), ".", 0);
+
+	if (pos_degrees_end <= 1){
+		mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Invalid NMEA sentence input"));
+	}
+
+	// Extracting the degrees value
+	pos_degrees_end -= 2;
+	char *degrees_char[pos_degrees_end+1];
+	degrees_char[pos_degrees_end] = '\0';
+
+	for (i = 0; i < pos_degrees_end; i++){
+		degrees_char[i] = nmea_section[i];
+	}
+
+	degrees = atoi(degrees_char);
+
+	// Extracting the minutes value
+	char *minutes_char[strlen(nmea_section) - pos_degrees_end + 1];
+	minutes_char[strlen(nmea_section) - pos_degrees_end] = '\0';
+
+	for (i = pos_degrees_end; i < strlen(nmea_section); i++){
+		minutes_char[i] = nmea_section[i];
+	}
+
+	minutes = atof(minutes_char);
+
+	// Combining them
+	total = degrees + minutes/60;
+
+	return total;
+}
+
 mp_obj_t update_buffer(mp_obj_t self_in){
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
@@ -219,8 +275,54 @@ mp_obj_t update_buffer(mp_obj_t self_in){
 
 	return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJECT_1(neo_m8_update_buffer_obj, update_buffer)
+static MP_DEFINE_CONST_FUN_OBJECT_1(neo_m8_update_buffer_obj, update_buffer);
 
+mp_obj_t position(mp_obj_t self_in){
+	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
+
+	uint8_t counter = 0;
+	char *gga_split[9], timestamp;
+	float latitude, longitude, pos_error;
+
+	update_data(self);
+
+	// Splitting the GLL sentence up into sections, which can then be processed
+	char *token = strtok(self->data.gga, ',');
+	while (token != NULL){
+		gga_split[counter] = token;
+
+		token = strtok(NULL, ",");
+		counter++;
+	}
+
+	// If there aren't enough fields (i.e. incomplete sentence, bad data) OR status flag indicates bad fix, then return zeros
+	if ((counter < 8) || (strcmp(gga_split[6], "1") != 0)){
+		return mp_obj_new_list(4, {mp_obj_new_int(0), mp_obj_new_int(0), mp_obj_new_int(0), mp_obj_new_int(0)});
+	}
+
+	// Extracting GMT timestamp in hh:mm:ss format
+	timestamp = extract_timestamp(gga_split[1]);
+
+	// Extracting latitude in degrees decimal minutes
+	latitude = extract_lat_long(gga_split[2]);
+
+	if (strcmp(gga_split[3], "S") == 0){
+		latitude *= -1;
+	}
+
+	// Extracting longitude in degrees decimal minutes
+	longitude = extract_lat_long(gga_split[4]);
+
+	if (strcmp(gga_split[5], "W") == 0){
+		longitude *= -1;
+	}
+
+	// Extracting HDOP value, converting it to horizontal position error
+	pos_error = atof(gga_split[8])*2.5;
+
+	return mp_obj_new_list(4, {mp_obj_new_str(timestamp), mp_obj_new_float(latitude), mp_obj_new_float(longitude), mp_obj_new_float(pos_error)});
+}
+static MP_DEFINE_CONST_FUN_OBJ1(neo_m8_position_obj, position);
 
 
 
@@ -232,6 +334,7 @@ static MP_DEFINE_CONST_FUN_OBJECT_1(neo_m8_update_buffer_obj, update_buffer)
 // Defining the functions that are exposed to micropython
 static const mp_rom_map_elem_t neo_m8_locals_dict_table[] = {
 	{MP_ROM_QSTR(MP_QSTR_update_buffer), MP_ROM_PTR(&neo_m8_update_buffer_obj)},
+	{MP_ROM_QSTR(MP_QSTR_position), MP_ROM_PTR(&neo_m8_position_obj)},
 };
 static MP_DEFINE_CONST_DICT(neo_m8_locals_dict, neo_m8_locals_dict_table);
 
