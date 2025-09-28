@@ -182,8 +182,10 @@ static float extract_lat_long(char *nmea_section){
 	int8_t pos_degrees_end, degrees;
 	float minutes, total;
 
+	size_t length = strlen(nmea_section);
+
 	// Finding the end of the degrees part of the lat/long string
-	pos_degrees_end = find_in_char_array(nmea_section, strlen(nmea_section), ".", 0);
+	pos_degrees_end = find_in_char_array(nmea_section, length, ".", 0);
 
 	if (pos_degrees_end <= 1){
 		mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Invalid NMEA sentence input"));
@@ -201,10 +203,10 @@ static float extract_lat_long(char *nmea_section){
 	degrees = atoi(degrees_char);
 
 	// Extracting the minutes value
-	char *minutes_char[strlen(nmea_section) - pos_degrees_end + 1];
-	minutes_char[strlen(nmea_section) - pos_degrees_end] = '\0';
+	char *minutes_char[length - pos_degrees_end + 1];
+	minutes_char[length - pos_degrees_end] = '\0';
 
-	for (i = pos_degrees_end; i < strlen(nmea_section); i++){
+	for (i = pos_degrees_end; i < length; i++){
 		minutes_char[i] = nmea_section[i];
 	}
 
@@ -280,7 +282,7 @@ static MP_DEFINE_CONST_FUN_OBJECT_1(neo_m8_update_buffer_obj, update_buffer);
 mp_obj_t position(mp_obj_t self_in){
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
-	uint8_t counter = 0;
+	uint8_t i;
 	char *gga_split[9], timestamp;
 	float latitude, longitude, pos_error;
 
@@ -288,15 +290,14 @@ mp_obj_t position(mp_obj_t self_in){
 
 	// Splitting the GLL sentence up into sections, which can then be processed
 	char *token = strtok(self->data.gga, ',');
-	while (token != NULL){
-		gga_split[counter] = token;
+	for (i = 0; token != NULL; i++){
+		gga_split[i] = token;
 
 		token = strtok(NULL, ",");
-		counter++;
 	}
 
 	// If there aren't enough fields (i.e. incomplete sentence, bad data) OR status flag indicates bad fix, then return zeros
-	if ((counter < 8) || (strcmp(gga_split[6], "1") != 0)){
+	if ((i < 8) || (strcmp(gga_split[6], "1") != 0)){
 		return mp_obj_new_list(4, {mp_obj_new_int(0), mp_obj_new_int(0), mp_obj_new_int(0), mp_obj_new_int(0)});
 	}
 
