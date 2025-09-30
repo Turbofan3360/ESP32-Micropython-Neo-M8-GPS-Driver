@@ -53,7 +53,7 @@ static int16_t find_in_char_array(char *array, uint16_t length, char character_t
 
 static uint8_t nmea_checksum(char *nmea_sentence, uint8_t length){
 	int16_t checksum_pos;
-	uint8_t i checksum_calc, checksum_sentence;
+	uint8_t i, checksum_calc, checksum_sentence;
 
 	// Finding where the checksum starts
 	checksum_pos = find_in_char_array(nmea_sentence, length, '*', 0);
@@ -162,7 +162,7 @@ static void update_data(neo_m8_obj_t *self){
 }
 
 static char* extract_timestamp(char *nmea_section){
-	static char timestamp[9];
+	char *timestamp = (char *) malloc(9*CHAR_SIZE);
 
 	timestamp[0] = nmea_section[0];
 	timestamp[1] = nmea_section[1];
@@ -177,15 +177,16 @@ static char* extract_timestamp(char *nmea_section){
 	return timestamp;
 }
 
-static float extract_lat_long(char *nmea_section){
+static float* extract_lat_long(char *nmea_section){
 	uint8_t i;
 	int8_t pos_degrees_end, degrees;
-	float minutes, total;
+	float minutes;
+	float *total = (float *) malloc(FLOAT_SIZE);
 
 	size_t length = strlen(nmea_section);
 
 	// Finding the end of the degrees part of the lat/long string
-	pos_degrees_end = find_in_char_array(nmea_section, length, ".", 0);
+	pos_degrees_end = find_in_char_array(nmea_section, length, '.', 0);
 
 	if (pos_degrees_end <= 1){
 		mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Invalid NMEA sentence input"));
@@ -193,7 +194,7 @@ static float extract_lat_long(char *nmea_section){
 
 	// Extracting the degrees value
 	pos_degrees_end -= 2;
-	char *degrees_char[pos_degrees_end+1];
+	char degrees_char[pos_degrees_end+1];
 	degrees_char[pos_degrees_end] = '\0';
 
 	for (i = 0; i < pos_degrees_end; i++){
@@ -203,17 +204,17 @@ static float extract_lat_long(char *nmea_section){
 	degrees = atoi(degrees_char);
 
 	// Extracting the minutes value
-	char *minutes_char[length - pos_degrees_end + 1];
+	char minutes_char[length - pos_degrees_end + 1];
 	minutes_char[length - pos_degrees_end] = '\0';
 
 	for (i = pos_degrees_end; i < length; i++){
-		minutes_char[i] = nmea_section[i];
+		minutes_char[i - pos_degrees_end] = nmea_section[i];
 	}
 
 	minutes = atof(minutes_char);
 
 	// Combining them
-	total = degrees + minutes/60;
+	*total = (degrees + minutes/60);
 
 	return total;
 }
@@ -277,14 +278,15 @@ mp_obj_t update_buffer(mp_obj_t self_in){
 
 	return mp_const_none;
 }
-static MP_DEFINE_CONST_FUN_OBJECT_1(neo_m8_update_buffer_obj, update_buffer);
+static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_update_buffer_obj, update_buffer);
 
 mp_obj_t position(mp_obj_t self_in){
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
+	mp_obj_t retvals;
 	uint8_t i;
-	char *gga_split[9], timestamp;
-	float latitude, longitude, pos_error;
+	char *gga_split[9], *timestamp;
+	float *latitude, *longitude, pos_error;
 
 	update_data(self);
 
@@ -293,12 +295,13 @@ mp_obj_t position(mp_obj_t self_in){
 	for (i = 0; token != NULL; i++){
 		gga_split[i] = token;
 
-		token = strtok(NULL, ",");
+		token = strtok(NULL, ',');
 	}
 
 	// If there aren't enough fields (i.e. incomplete sentence, bad data) OR status flag indicates bad fix, then return zeros
 	if ((i < 8) || (strcmp(gga_split[6], "1") != 0)){
-		return mp_obj_new_list(4, {mp_obj_new_int(0), mp_obj_new_int(0), mp_obj_new_int(0), mp_obj_new_int(0)});
+		retvals = mp_obj_new_list(4, {mp_obj_new_int(0), mp_obj_new_int(0), mp_obj_new_int(0), mp_obj_new_str("0")});
+		return retvals;
 	}
 
 	// Extracting GMT timestamp in hh:mm:ss format
@@ -308,22 +311,121 @@ mp_obj_t position(mp_obj_t self_in){
 	latitude = extract_lat_long(gga_split[2]);
 
 	if (strcmp(gga_split[3], "S") == 0){
-		latitude *= -1;
+		*latitude *= -1;
 	}
 
 	// Extracting longitude in degrees decimal minutes
 	longitude = extract_lat_long(gga_split[4]);
 
 	if (strcmp(gga_split[5], "W") == 0){
-		longitude *= -1;
+		*longitude *= -1;
 	}
 
 	// Extracting HDOP value, converting it to horizontal position error
 	pos_error = atof(gga_split[8])*2.5;
 
-	return mp_obj_new_list(4, {mp_obj_new_str(timestamp), mp_obj_new_float(latitude), mp_obj_new_float(longitude), mp_obj_new_float(pos_error)});
+	retvals = mp_obj_new_list(4, {mp_obj_new_float(latitude), mp_obj_new_float(longitude), mp_obj_new_float(pos_error), mp_obj_new_str(timestamp)});
+
+	free(timestamp);
+	free(latitude);
+	free(longitude);
+
+	return retvals;
 }
-static MP_DEFINE_CONST_FUN_OBJ1(neo_m8_position_obj, position);
+static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_position_obj, position);
+
+mp_obj_t velocity(mp_obj_t self_in){
+	neo_m8_obj *self = MP_OBJ_TO_PTR(self_in);
+
+	mp_obj_t retvals;
+	uint8_t i;
+	char *rmc_split[13], *timestamp;
+	float sog, cog, mag_var;
+
+	update_data(self);
+
+	// Splitting the RMC sentence up into sections, which can then be processed
+	char *token = strtok(self->data.rmc, ',');
+	for (i = 0; token != NULL; i++){
+		rmc_split[i] = token;
+
+		token = strtok(NULL, ',');
+	}
+
+	if ((i < 8) || (strcmp(rmc_split[2], "A") != 0)){
+		retvals = mp_obj_new_list(4, {mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0"), })
+		return retvals;
+	}
+
+	// Extracting timestamp
+	timestamp = extract_timestamp(rmc_split[1]);
+
+	// Extracting SOG (knots)
+	sog = atof(rmc_split[7]);
+
+	// Extracting COG (degrees)
+	cog = atof(rmc_split[8]);
+
+	// Extracting magnetic variation (degrees)
+	mag_var = atof(rmc_split[9]);
+
+	retvals = mp_obj_new_list(4, {mp_obj_new_float(sog), mp_obj_new_float(cog), mp_obj_new_float(mag_var), mp_obj_new_str(timestamp)});
+
+	free(timestamp);
+
+	return retvals;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_velocity_obj, velocity);
+
+mp_obj_t altitude(mp_obj_t self_in){
+	neo_m8_obj *self = MP_OBJ_TO_PTR(self_in);
+
+	mp_obj_t retvals;
+	uint8_t i;
+	char *gga_split[15], *timestamp, *gsa_split = NULL;
+	float altitude, geosep, verterror;
+
+	update_data(self);
+
+	// Splitting the GGA sentence up into sections, which can then be processed
+	char *token = strtok(self->data.rmc, ',');
+	for (i = 0; token != NULL; i++){
+		gga_split[i] = token;
+
+		token = strtok(NULL, ',');
+	}
+
+	if ((i < 15) || (strcmp(gga_split[6], "1") != 0)){
+		retvals = mp_obj_new_list(4, {mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_int(0.0f), mp_obj_new_str("0")})
+		return retvals;
+	}
+
+	// Extracting timestamp
+	timestamp = extract_timestamp(gga_split[1]);
+
+	// Extracting altitude
+	altitude = atof(gga_split[9]);
+
+	// Extracting geoid separation
+	geosep = atof(gga_split[11]);
+
+	// Extracting vertical error
+	char *token = strtok(self->data.gsa, ',');
+	for (i = 0; token != NULL; i++){
+		// Re-allocating extended memory - the length of the GSA sentence is unknown
+		gsa_split = realloc(gsa_split, (i+1)*CHAR_PTR_SIZE);
+
+		gsa_split[i] = token;
+
+		token = strtok(NULL, ',');
+	}
+
+	verterror = atof(gsa_split[i-1])*5;
+
+	retvals = mp_obj_new_list(4, {mp_obj_new_float(altitude), mp_obj_new_float(geosep), mp_obj_new_float(verterror), mp_obj_new_str(timestamp)});
+	return retvals;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_altitude_obj, altitude);
 
 
 
@@ -336,6 +438,8 @@ static MP_DEFINE_CONST_FUN_OBJ1(neo_m8_position_obj, position);
 static const mp_rom_map_elem_t neo_m8_locals_dict_table[] = {
 	{MP_ROM_QSTR(MP_QSTR_update_buffer), MP_ROM_PTR(&neo_m8_update_buffer_obj)},
 	{MP_ROM_QSTR(MP_QSTR_position), MP_ROM_PTR(&neo_m8_position_obj)},
+	{MP_ROM_QSTR(MP_QSTR_velocity), MP_ROM_PTR(&neo_m8_velocity_obj)},
+	{MP_ROM_QSTR(MP_QSTR_altitude), MP_ROM_PTR(&neo_m8_altitude_obj)},
 };
 static MP_DEFINE_CONST_DICT(neo_m8_locals_dict, neo_m8_locals_dict_table);
 
