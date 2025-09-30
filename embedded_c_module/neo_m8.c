@@ -300,7 +300,7 @@ mp_obj_t position(mp_obj_t self_in){
 
 	// If there aren't enough fields (i.e. incomplete sentence, bad data) OR status flag indicates bad fix, then return zeros
 	if ((i < 8) || (strcmp(gga_split[6], "1") != 0)){
-		retvals = mp_obj_new_list(4, {mp_obj_new_int(0), mp_obj_new_int(0), mp_obj_new_int(0), mp_obj_new_str("0")});
+		retvals = mp_obj_new_list(4, (mp_obj_t){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
 		return retvals;
 	}
 
@@ -324,7 +324,7 @@ mp_obj_t position(mp_obj_t self_in){
 	// Extracting HDOP value, converting it to horizontal position error
 	pos_error = atof(gga_split[8])*2.5;
 
-	retvals = mp_obj_new_list(4, {mp_obj_new_float(latitude), mp_obj_new_float(longitude), mp_obj_new_float(pos_error), mp_obj_new_str(timestamp)});
+	retvals = mp_obj_new_list(4, (mp_obj_t){mp_obj_new_float(latitude), mp_obj_new_float(longitude), mp_obj_new_float(pos_error), mp_obj_new_str(timestamp, 8)});
 
 	free(timestamp);
 	free(latitude);
@@ -335,7 +335,7 @@ mp_obj_t position(mp_obj_t self_in){
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_position_obj, position);
 
 mp_obj_t velocity(mp_obj_t self_in){
-	neo_m8_obj *self = MP_OBJ_TO_PTR(self_in);
+	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
 	mp_obj_t retvals;
 	uint8_t i;
@@ -353,7 +353,7 @@ mp_obj_t velocity(mp_obj_t self_in){
 	}
 
 	if ((i < 8) || (strcmp(rmc_split[2], "A") != 0)){
-		retvals = mp_obj_new_list(4, {mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0"), })
+		retvals = mp_obj_new_list(4, (mp_obj_t){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
 		return retvals;
 	}
 
@@ -369,7 +369,7 @@ mp_obj_t velocity(mp_obj_t self_in){
 	// Extracting magnetic variation (degrees)
 	mag_var = atof(rmc_split[9]);
 
-	retvals = mp_obj_new_list(4, {mp_obj_new_float(sog), mp_obj_new_float(cog), mp_obj_new_float(mag_var), mp_obj_new_str(timestamp)});
+	retvals = mp_obj_new_list(4, (mp_obj_t){mp_obj_new_float(sog), mp_obj_new_float(cog), mp_obj_new_float(mag_var), mp_obj_new_str(timestamp, 8)});
 
 	free(timestamp);
 
@@ -378,7 +378,7 @@ mp_obj_t velocity(mp_obj_t self_in){
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_velocity_obj, velocity);
 
 mp_obj_t altitude(mp_obj_t self_in){
-	neo_m8_obj *self = MP_OBJ_TO_PTR(self_in);
+	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
 	mp_obj_t retvals;
 	uint8_t i;
@@ -388,7 +388,7 @@ mp_obj_t altitude(mp_obj_t self_in){
 	update_data(self);
 
 	// Splitting the GGA sentence up into sections, which can then be processed
-	char *token = strtok(self->data.rmc, ',');
+	char *token = strtok(self->data.gga, ',');
 	for (i = 0; token != NULL; i++){
 		gga_split[i] = token;
 
@@ -396,7 +396,7 @@ mp_obj_t altitude(mp_obj_t self_in){
 	}
 
 	if ((i < 15) || (strcmp(gga_split[6], "1") != 0)){
-		retvals = mp_obj_new_list(4, {mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_int(0.0f), mp_obj_new_str("0")})
+		retvals = mp_obj_new_list(4, (mp_obj_t){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_int(0.0f), mp_obj_new_str("0", 1)});
 		return retvals;
 	}
 
@@ -422,7 +422,11 @@ mp_obj_t altitude(mp_obj_t self_in){
 
 	verterror = atof(gsa_split[i-1])*5;
 
-	retvals = mp_obj_new_list(4, {mp_obj_new_float(altitude), mp_obj_new_float(geosep), mp_obj_new_float(verterror), mp_obj_new_str(timestamp)});
+	retvals = mp_obj_new_list(4, (mp_obj_t){mp_obj_new_float(altitude), mp_obj_new_float(geosep), mp_obj_new_float(verterror), mp_obj_new_str(timestamp, 8)});
+
+	free(timestamp);
+	free(gsa_split);
+
 	return retvals;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_altitude_obj, altitude);
