@@ -300,7 +300,7 @@ mp_obj_t position(mp_obj_t self_in){
 
 	// If there aren't enough fields (i.e. incomplete sentence, bad data) OR status flag indicates bad fix, then return zeros
 	if ((i < 8) || (strcmp(gga_split[6], "1") != 0)){
-		retvals = mp_obj_new_list(4, (mp_obj_t){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
+		retvals = mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
 		return retvals;
 	}
 
@@ -324,7 +324,7 @@ mp_obj_t position(mp_obj_t self_in){
 	// Extracting HDOP value, converting it to horizontal position error
 	pos_error = atof(gga_split[8])*2.5;
 
-	retvals = mp_obj_new_list(4, (mp_obj_t){mp_obj_new_float(latitude), mp_obj_new_float(longitude), mp_obj_new_float(pos_error), mp_obj_new_str(timestamp, 8)});
+	retvals = mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(latitude), mp_obj_new_float(longitude), mp_obj_new_float(pos_error), mp_obj_new_str(timestamp, 8)});
 
 	free(timestamp);
 	free(latitude);
@@ -353,7 +353,7 @@ mp_obj_t velocity(mp_obj_t self_in){
 	}
 
 	if ((i < 8) || (strcmp(rmc_split[2], "A") != 0)){
-		retvals = mp_obj_new_list(4, (mp_obj_t){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
+		retvals = mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
 		return retvals;
 	}
 
@@ -369,7 +369,7 @@ mp_obj_t velocity(mp_obj_t self_in){
 	// Extracting magnetic variation (degrees)
 	mag_var = atof(rmc_split[9]);
 
-	retvals = mp_obj_new_list(4, (mp_obj_t){mp_obj_new_float(sog), mp_obj_new_float(cog), mp_obj_new_float(mag_var), mp_obj_new_str(timestamp, 8)});
+	retvals = mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(sog), mp_obj_new_float(cog), mp_obj_new_float(mag_var), mp_obj_new_str(timestamp, 8)});
 
 	free(timestamp);
 
@@ -396,7 +396,7 @@ mp_obj_t altitude(mp_obj_t self_in){
 	}
 
 	if ((i < 15) || (strcmp(gga_split[6], "1") != 0)){
-		retvals = mp_obj_new_list(4, (mp_obj_t){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_int(0.0f), mp_obj_new_str("0", 1)});
+		retvals = mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_int(0.0f), mp_obj_new_str("0", 1)});
 		return retvals;
 	}
 
@@ -410,7 +410,7 @@ mp_obj_t altitude(mp_obj_t self_in){
 	geosep = atof(gga_split[11]);
 
 	// Extracting vertical error
-	char *token = strtok(self->data.gsa, ',');
+	token = strtok(self->data.gsa, ',');
 	for (i = 0; token != NULL; i++){
 		// Re-allocating extended memory - the length of the GSA sentence is unknown
 		gsa_split = realloc(gsa_split, (i+1)*CHAR_PTR_SIZE);
@@ -422,7 +422,7 @@ mp_obj_t altitude(mp_obj_t self_in){
 
 	verterror = atof(gsa_split[i-1])*5;
 
-	retvals = mp_obj_new_list(4, (mp_obj_t){mp_obj_new_float(altitude), mp_obj_new_float(geosep), mp_obj_new_float(verterror), mp_obj_new_str(timestamp, 8)});
+	retvals = mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(altitude), mp_obj_new_float(geosep), mp_obj_new_float(verterror), mp_obj_new_str(timestamp, 8)});
 
 	free(timestamp);
 	free(gsa_split);
