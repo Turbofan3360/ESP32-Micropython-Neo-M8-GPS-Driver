@@ -76,8 +76,6 @@ static uint8_t nmea_checksum(char *nmea_sentence, uint8_t length){
 }
 
 static void update_data(neo_m8_obj_t *self){
-	mp_obj_t self_mp = MP_OBJ_FROM_PTR(self);
-
 	uint8_t sentences_read = 0;
 	int16_t start_pos = -1, end_pos = -1;
 	char nmea_sentence_type[4];
@@ -94,6 +92,11 @@ static void update_data(neo_m8_obj_t *self){
 		// Allocating memory to and copying the NMEA sentence it's found into a temporary variable
 		size_t sentence_length = end_pos - start_pos;
 		char *data_section = (char *) malloc(sentence_length*CHAR_SIZE + 1);
+
+		if (data_section == NULL){
+			mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
+		}
+
 		strncpy(data_section, self->buffer + start_pos, sentence_length);
 		data_section[sentence_length] = '\0';
 
@@ -116,6 +119,7 @@ static void update_data(neo_m8_obj_t *self){
 
 			if (self->data.gll == NULL){
 				// Error: out of memory
+				free(data_section);
 				mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
 			}
 
@@ -127,6 +131,7 @@ static void update_data(neo_m8_obj_t *self){
 
 			if (self->data.gsa == NULL){
 				// Error: out of memory
+				free(data_section);
 				mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
 			}
 
@@ -138,6 +143,7 @@ static void update_data(neo_m8_obj_t *self){
 
 			if (self->data.gga == NULL){
 				// Error: out of memory
+				free(data_section);
 				mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
 			}
 
@@ -149,6 +155,7 @@ static void update_data(neo_m8_obj_t *self){
 
 			if (self->data.rmc == NULL){
 				// Error: out of memory
+				free(data_section);
 				mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
 			}
 
@@ -163,6 +170,10 @@ static void update_data(neo_m8_obj_t *self){
 
 static char* extract_timestamp(char *nmea_section){
 	char *timestamp = (char *) malloc(9*CHAR_SIZE);
+
+	if (timestamp == NULL){
+		mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
+	}
 
 	timestamp[0] = nmea_section[0];
 	timestamp[1] = nmea_section[1];
@@ -182,6 +193,10 @@ static float* extract_lat_long(char *nmea_section){
 	int8_t pos_degrees_end, degrees;
 	float minutes;
 	float *total = (float *) malloc(FLOAT_SIZE);
+
+	if (total == NULL){
+		mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
+	}
 
 	size_t length = strlen(nmea_section);
 
@@ -225,19 +240,25 @@ mp_obj_t update_buffer(mp_obj_t self_in){
 	mp_buffer_info_t buf_info;
 	mp_obj_t any_method[2], read_method[2];
 	uint16_t copy_start, new_bytes_copy_start = 0;
+	lr_buf_t cpu_state;
 
 	// Loading required methods
 	mp_load_method(self->uart_bus, MP_QSTR_any, any_method);
 	mp_load_method(self->uart_bus, MP_QSTR_read, read_method);
 
-	// Checking if there's any data available
-	if (mp_obj_get_int(mp_call_method_n_kw(0, 0, any_method)) == 0){
-		return mp_const_none;
-	}
+	if (nlr_push(&cpu_state) == 0){
+		// Checking if there's any data available
+		if (mp_obj_get_int(mp_call_method_n_kw(0, 0, any_method)) == 0){
+			return mp_const_none;
+		}
 
-	// Getting new UART data and then buffer info from it
-	mp_obj_t bytes = mp_call_method_n_kw(0, 0, read_method);
-	mp_get_buffer_raise(bytes, &buf_info, MP_BUFFER_READ);
+		// Getting new UART data and then buffer info from it
+		mp_obj_t bytes = mp_call_method_n_kw(0, 0, read_method);
+		mp_get_buffer_raise(bytes, &buf_info, MP_BUFFER_READ);
+	}
+	else {
+		mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("UART method failed");
+	}
 
 	// Finding total number of bytes held
 	uint16_t buffer_total = self->buffer_len + buf_info.len;
@@ -414,6 +435,11 @@ mp_obj_t altitude(mp_obj_t self_in){
 	for (i = 0; token != NULL; i++){
 		// Re-allocating extended memory - the length of the GSA sentence is unknown
 		gsa_split = realloc(gsa_split, (i+1)*CHAR_PTR_SIZE);
+
+		if (gsa_split == NULL){
+			free(timestamp);
+			mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
+		}
 
 		gsa_split[i] = token;
 
