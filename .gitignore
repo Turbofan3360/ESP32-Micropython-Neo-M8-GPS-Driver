@@ -1,0 +1,5 @@
+# Environment variables + JetBrains IDE config files
+.env/
+.venv/
+venv/
+.idea/

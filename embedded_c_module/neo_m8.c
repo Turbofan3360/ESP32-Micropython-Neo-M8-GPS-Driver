@@ -12,6 +12,8 @@ mp_obj_t neo_m8_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, 
 		mp_load_method(args[0], MP_QSTR_any, test_method);
 		mp_load_method(args[0], MP_QSTR_read, test_method);
 		mp_load_method(args[0], MP_QSTR_write, test_method);
+
+		nlr_pop();
 	}
 	else {
 		mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("UART bus object not valid"));
@@ -53,7 +55,7 @@ static int16_t find_in_char_array(char *array, uint16_t length, char character_t
 
 static uint8_t nmea_checksum(char *nmea_sentence, uint8_t length){
 	int16_t checksum_pos;
-	uint8_t i, checksum_calc, checksum_sentence;
+	uint8_t i, checksum_calc = 0, checksum_sentence;
 
 	// Finding where the checksum starts
 	checksum_pos = find_in_char_array(nmea_sentence, length, '*', 0);
@@ -85,7 +87,7 @@ static void update_data(neo_m8_obj_t *self){
 		end_pos = find_in_char_array(self->buffer, self->buffer_len, '\n', start_pos);
 
 		if ((start_pos == -1) || (end_pos == -1)){
-			update_buffer(self_mp);
+			update_buffer_internal(self);
 			continue;
 		}
 
@@ -115,7 +117,7 @@ static void update_data(neo_m8_obj_t *self){
 		size_t str_length = strlen(data_section);
 
 		if (strcmp(nmea_sentence_type, "GLL") == 0){
-			self->data.gll = realloc(self->data.gll, str_length*CHAR_SIZE + 1);
+			self->data.gll = (char *) realloc(self->data.gll, str_length*CHAR_SIZE + 1);
 
 			if (self->data.gll == NULL){
 				// Error: out of memory
@@ -127,7 +129,7 @@ static void update_data(neo_m8_obj_t *self){
 			self->data.gll[str_length] = '\0';
 		}
 		else if(strcmp(nmea_sentence_type, "GSA") == 0){
-			self->data.gsa = realloc(self->data.gsa, str_length*CHAR_SIZE + 1);
+			self->data.gsa = (char *) realloc(self->data.gsa, str_length*CHAR_SIZE + 1);
 
 			if (self->data.gsa == NULL){
 				// Error: out of memory
@@ -139,7 +141,7 @@ static void update_data(neo_m8_obj_t *self){
 			self->data.gsa[str_length] = '\0';
 		}
 		else if(strcmp(nmea_sentence_type, "GGA") == 0){
-			self->data.gga = realloc(self->data.gga, str_length*CHAR_SIZE + 1);
+			self->data.gga = (char *) realloc(self->data.gga, str_length*CHAR_SIZE + 1);
 
 			if (self->data.gga == NULL){
 				// Error: out of memory
@@ -151,7 +153,7 @@ static void update_data(neo_m8_obj_t *self){
 			self->data.gga[str_length] = '\0';
 		}
 		else if(strcmp(nmea_sentence_type, "RMC") == 0){
-			self->data.rmc = realloc(self->data.rmc, str_length*CHAR_SIZE + 1);
+			self->data.rmc = (char *) realloc(self->data.rmc, str_length*CHAR_SIZE + 1);
 
 			if (self->data.rmc == NULL){
 				// Error: out of memory
@@ -234,13 +236,11 @@ static float* extract_lat_long(char *nmea_section){
 	return total;
 }
 
-mp_obj_t update_buffer(mp_obj_t self_in){
-	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
-
+static void update_buffer_internal(neo_m8_obj_t *self){
 	mp_buffer_info_t buf_info;
 	mp_obj_t any_method[2], read_method[2];
 	uint16_t copy_start, new_bytes_copy_start = 0;
-	lr_buf_t cpu_state;
+	nlr_buf_t cpu_state;
 
 	// Loading required methods
 	mp_load_method(self->uart_bus, MP_QSTR_any, any_method);
@@ -249,15 +249,17 @@ mp_obj_t update_buffer(mp_obj_t self_in){
 	if (nlr_push(&cpu_state) == 0){
 		// Checking if there's any data available
 		if (mp_obj_get_int(mp_call_method_n_kw(0, 0, any_method)) == 0){
-			return mp_const_none;
+			return;
 		}
 
 		// Getting new UART data and then buffer info from it
 		mp_obj_t bytes = mp_call_method_n_kw(0, 0, read_method);
 		mp_get_buffer_raise(bytes, &buf_info, MP_BUFFER_READ);
+
+		nlr_pop();
 	}
 	else {
-		mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("UART method failed");
+		mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("UART method failed"));
 	}
 
 	// Finding total number of bytes held
@@ -297,6 +299,17 @@ mp_obj_t update_buffer(mp_obj_t self_in){
 	// Ensuring termination character added
 	self->buffer[self->buffer_len] = '\0';
 
+	return;
+}
+
+mp_obj_t update_buffer(mp_obj_t self_in){
+	/**
+	 * Micropython-exposed method to call the internal C buffer update method
+	*/
+	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
+
+	update_buffer_internal(self);
+
 	return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_update_buffer_obj, update_buffer);
@@ -312,11 +325,11 @@ mp_obj_t position(mp_obj_t self_in){
 	update_data(self);
 
 	// Splitting the GLL sentence up into sections, which can then be processed
-	char *token = strtok(self->data.gga, ',');
+	char *token = strtok(self->data.gga, ",");
 	for (i = 0; token != NULL; i++){
 		gga_split[i] = token;
 
-		token = strtok(NULL, ',');
+		token = strtok(NULL, ",");
 	}
 
 	// If there aren't enough fields (i.e. incomplete sentence, bad data) OR status flag indicates bad fix, then return zeros
@@ -345,7 +358,7 @@ mp_obj_t position(mp_obj_t self_in){
 	// Extracting HDOP value, converting it to horizontal position error
 	pos_error = atof(gga_split[8])*2.5;
 
-	retvals = mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(latitude), mp_obj_new_float(longitude), mp_obj_new_float(pos_error), mp_obj_new_str(timestamp, 8)});
+	retvals = mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(*latitude), mp_obj_new_float(*longitude), mp_obj_new_float(pos_error), mp_obj_new_str(timestamp, 8)});
 
 	free(timestamp);
 	free(latitude);
@@ -366,11 +379,11 @@ mp_obj_t velocity(mp_obj_t self_in){
 	update_data(self);
 
 	// Splitting the RMC sentence up into sections, which can then be processed
-	char *token = strtok(self->data.rmc, ',');
+	char *token = strtok(self->data.rmc, ",");
 	for (i = 0; token != NULL; i++){
 		rmc_split[i] = token;
 
-		token = strtok(NULL, ',');
+		token = strtok(NULL, ",");
 	}
 
 	if ((i < 8) || (strcmp(rmc_split[2], "A") != 0)){
@@ -403,17 +416,17 @@ mp_obj_t altitude(mp_obj_t self_in){
 
 	mp_obj_t retvals;
 	uint8_t i;
-	char *gga_split[15], *timestamp, *gsa_split = NULL;
+	char *gga_split[15], *timestamp, **gsa_split = NULL;
 	float altitude, geosep, verterror;
 
 	update_data(self);
 
 	// Splitting the GGA sentence up into sections, which can then be processed
-	char *token = strtok(self->data.gga, ',');
+	char *token = strtok(self->data.gga, ",");
 	for (i = 0; token != NULL; i++){
 		gga_split[i] = token;
 
-		token = strtok(NULL, ',');
+		token = strtok(NULL, ",");
 	}
 
 	if ((i < 15) || (strcmp(gga_split[6], "1") != 0)){
@@ -431,10 +444,10 @@ mp_obj_t altitude(mp_obj_t self_in){
 	geosep = atof(gga_split[11]);
 
 	// Extracting vertical error
-	token = strtok(self->data.gsa, ',');
+	token = strtok(self->data.gsa, ",");
 	for (i = 0; token != NULL; i++){
 		// Re-allocating extended memory - the length of the GSA sentence is unknown
-		gsa_split = realloc(gsa_split, (i+1)*CHAR_PTR_SIZE);
+		gsa_split = (char **) realloc(gsa_split, (i+1)*CHAR_PTR_SIZE);
 
 		if (gsa_split == NULL){
 			free(timestamp);
@@ -443,7 +456,7 @@ mp_obj_t altitude(mp_obj_t self_in){
 
 		gsa_split[i] = token;
 
-		token = strtok(NULL, ',');
+		token = strtok(NULL, ",");
 	}
 
 	verterror = atof(gsa_split[i-1])*5;
