@@ -255,7 +255,7 @@ static void update_buffer_internal(neo_m8_obj_t *self){
 	if (nlr_push(&cpu_state) == 0){
 		// Checking if there's any data available
 		if (mp_obj_get_int(mp_call_method_n_kw(0, 0, any_method)) == 0){
-			nlr_pop()
+			nlr_pop();
 			return;
 		}
 
