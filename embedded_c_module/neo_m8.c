@@ -79,12 +79,13 @@ static uint8_t nmea_checksum(char *nmea_sentence, uint8_t length){
 
 static void update_data(neo_m8_obj_t *self){
 	uint8_t sentences_read = 0;
-	int16_t start_pos = -1, end_pos = -1, timeout_ms = 1500, start_time = mp_hal_ticks_ms();
+	int16_t start_pos = -1, end_pos = -1;
+	uint32_t start_time = mp_hal_ticks_ms();
 	char nmea_sentence_type[4];
 
 	while (sentences_read < 5){
 		// Timeout for the function. If it's running for more than 1 second, then the function quits and raises an error
-		if (mp_hal_ticks_ms() - start_time > timeout_ms){
+		if (mp_hal_ticks_ms() - start_time > 1500){
 			mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("Function timed out - no valid NMEA data found in buffer."));
 		}
 
