@@ -255,6 +255,7 @@ static void update_buffer_internal(neo_m8_obj_t *self){
 	if (nlr_push(&cpu_state) == 0){
 		// Checking if there's any data available
 		if (mp_obj_get_int(mp_call_method_n_kw(0, 0, any_method)) == 0){
+			nlr_pop()
 			return;
 		}
 
@@ -504,7 +505,7 @@ MP_DEFINE_CONST_OBJ_TYPE(
 // Defining global constants
 static const mp_rom_map_elem_t neo_m8_module_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__) , MP_ROM_QSTR(MP_QSTR_neo_m8) },
-    { MP_ROM_QSTR(MP_QSTR_neo_m8), MP_ROM_PTR(&neo_m8_type) },
+    { MP_ROM_QSTR(MP_QSTR_NEO_M8), MP_ROM_PTR(&neo_m8_type) },
 };
 static MP_DEFINE_CONST_DICT(neo_m8_globals_table, neo_m8_module_globals_table);
 
