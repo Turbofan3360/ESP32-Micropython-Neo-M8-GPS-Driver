@@ -118,7 +118,7 @@ static void update_data(neo_m8_obj_t *self){
 		}
 
 		// Finding the type of NMEA sentence it is, then saving it into memory
-		strncpy(nmea_sentence_type, data_section + 1, 3);
+		strncpy(nmea_sentence_type, data_section + 3, 3);
 		nmea_sentence_type[3] = '\0';
 		size_t str_length = strlen(data_section);
 
@@ -436,7 +436,7 @@ mp_obj_t altitude(mp_obj_t self_in){
 		token = strtok(NULL, ",");
 	}
 
-	if ((i < 15) || (strcmp(gga_split[6], "1") != 0)){
+	if ((i < 13) || (strcmp(gga_split[6], "1") != 0)){
 		retvals = mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_int(0.0f), mp_obj_new_str("0", 1)});
 		return retvals;
 	}
