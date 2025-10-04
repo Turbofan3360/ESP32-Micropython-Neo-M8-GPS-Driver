@@ -408,7 +408,7 @@ mp_obj_t velocity(mp_obj_t self_in){
 	// Extracting magnetic variation (degrees)
 	mag_var = atof(rmc_split[10]);
 
-	if (strncmp(rmc_split[11], "W") == 0){
+	if (strcmp(rmc_split[11], "W") == 0){
 		mag_var *= -1;
 	}
 
@@ -575,7 +575,7 @@ mp_obj_t getdata(mp_obj_t self_in){
 	// Extracting magnetic variation (degrees)
 	mag_var = atof(rmc_split[10]);
 
-	if (strncmp(rmc_split[11], "W") == 0){
+	if (strcmp(rmc_split[11], "W") == 0){
 		mag_var *= -1;
 	}
 
