@@ -237,6 +237,7 @@ static float* extract_lat_long(char *nmea_section){
 	pos_degrees_end = find_in_char_array(nmea_section, length, '.', 0);
 
 	if (pos_degrees_end <= 1){
+		free(total);
 		mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Invalid NMEA sentence input"));
 	}
 
