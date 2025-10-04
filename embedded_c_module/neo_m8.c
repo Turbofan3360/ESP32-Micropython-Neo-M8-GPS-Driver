@@ -648,16 +648,18 @@ mp_obj_t gnss_stop(mp_obj_t self_in){
 	 * Function to softly shut down the NEO-M8's GNSS systems
 	 * Can be used for power saving as well as just turning it off
 	*/
+	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 	mp_obj_t write_method[2];
 	nlr_buf_t cpu_state;
-
-	// Defining the UBX-CFG-RST packet to send
-	mp_obj_t packet[3] = {write_method[0], write_method[1],
-		mp_obj_new_bytes((const byte[12]){0xB5, 0x62, 0x06, 0x04, 0x04, 0x00, 0x00, 0x00, 0x08, 0x00, 0x16, 0x74}, 12)};
 
 	if (nlr_push(&cpu_state) == 0){
 		// Loads the UART write method
 		mp_load_method(self->uart_bus, MP_QSTR_write, write_method);
+
+		// Defining the UBX-CFG-RST packet to send
+		// Doesn't need to be in error catching, but needs write_method to be defined
+		mp_obj_t packet[3] = {write_method[0], write_method[1],
+			mp_obj_new_bytes((const byte[12]){0xB5, 0x62, 0x06, 0x04, 0x04, 0x00, 0x00, 0x00, 0x08, 0x00, 0x16, 0x74}, 12)};
 
 		// Sending the UBX packet
 		mp_call_method_n_kw(1, 0, packet);
@@ -677,16 +679,18 @@ mp_obj_t gnss_start(mp_obj_t self_in){
 	 * Function to start up the NEO-M8's GNSS systems
 	 * To be used to start the module up again after calling gnss_stop()
 	*/
+	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 	mp_obj_t write_method[2];
 	nlr_buf_t cpu_state;
-
-	// Defining the UBX-CFG-RST packet to send
-	mp_obj_t packet[3] = {write_method[0], write_method[1],
-	    mp_obj_new_bytes((const byte[12]){0xB5, 0x62, 0x06, 0x04, 0x04, 0x00, 0x00, 0x00, 0x09, 0x00, 0x17, 0x76}, 12)};
 
 	if (nlr_push(&cpu_state) == 0){
 		// Loads the UART write method
 		mp_load_method(self->uart_bus, MP_QSTR_write, write_method);
+
+		// Defining the UBX-CFG-RST packet to send
+		// Doesn't need to be in error catching, but needs write_method to be defined
+		mp_obj_t packet[3] = {write_method[0], write_method[1],
+	    	mp_obj_new_bytes((const byte[12]){0xB5, 0x62, 0x06, 0x04, 0x04, 0x00, 0x00, 0x00, 0x09, 0x00, 0x17, 0x76}, 12)};
 
 		// Sending the UBX packet
 		mp_call_method_n_kw(1, 0, packet);
