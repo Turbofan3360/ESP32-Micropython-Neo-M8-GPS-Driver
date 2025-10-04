@@ -158,7 +158,6 @@ class GPSReceive:
         
         SOG is in Knots (Kn) - returned as string with "Kn"
         COG is in degrees - returned as string with "°"
-        Magnetic variation is in degrees - returned as float
         Timestamp (UTC) formatted as hh:mm:ss - returned as string
         """
         
@@ -186,14 +185,9 @@ class GPSReceive:
                 cog = rmc_sentence[8] + "°"
             else:
                 cog = "N/A"
-
-            if rmc_sentence[10] or rmc_sentence[11]:
-                mag_variation = rmc_sentence[10]+rmc_sentence[11] + "°"
-            else:
-                mag_variation = "0°"
             
-            return sog, cog, mag_variation, time_stamp
-        return 0, 0, 0, time_stamp
+            return sog, cog, time_stamp
+        return 0, 0, time_stamp
 
     def altitude(self, data_needs_updating=True):
         """
@@ -249,13 +243,12 @@ class GPSReceive:
         Vertical error is in meters - float
         SOG is in Knots (Kn) - string with "Kn"
         COG is in degrees - string with "°"
-        Magnetic variation is in degrees - float
         Geoid separation is in meters - float
         Timestamp (UTC) is formatted as hh:mm:ss - string
         """
         
         lat, long, position_error, timestamp_0 = self.position()
-        sog, cog, mag_variation, timestamp_1 = self.velocity(data_needs_updating=False)
+        sog, cog, timestamp_1 = self.velocity(data_needs_updating=False)
         alt, geo_sep, vertical_error, timestamp_2 = self.altitude(data_needs_updating=False)
         
         # Trying to get timestamp from at least 1 method
@@ -268,7 +261,7 @@ class GPSReceive:
         else:
             timestamp = 0
                 
-        return lat, long, position_error, alt, vertical_error, sog, cog, mag_variation, geo_sep, timestamp
+        return lat, long, position_error, alt, vertical_error, sog, cog, geo_sep, timestamp
     
     def _ubx_ack_nack(self):
         start = time.time_ns()
