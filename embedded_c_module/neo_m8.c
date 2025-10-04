@@ -392,7 +392,7 @@ mp_obj_t velocity(mp_obj_t self_in){
 		token = strtok(NULL, ",");
 	}
 
-	if ((i < 8) || (strcmp(rmc_split[2], "A") != 0)){
+	if ((i < 11) || (strcmp(rmc_split[2], "A") != 0)){
 		return mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
 	}
 
