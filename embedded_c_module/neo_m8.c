@@ -1,6 +1,10 @@
 #include "neo_m8.h"
 
 mp_obj_t neo_m8_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, const mp_obj_t *args){
+	/**
+	 * Checks all the given arguments, tests the micropython UART object, and handles initialization of the driver
+	 * Also initializes the micropython object which is passed back
+	*/
 	// Checking arguments
 	mp_arg_check_num(n_args, n_kw, 1, 1, false);
 
@@ -36,6 +40,11 @@ mp_obj_t neo_m8_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, 
 }
 
 static int16_t find_in_char_array(char *array, uint16_t length, char character_to_look_for, int16_t starting_point){
+	/**
+	 * Utility to find the index of a specific character in a string
+	 * Basically, a C implementation of .find() in python 
+	 * Returns the index of the character, or -1 if it's not found
+	*/
 	uint16_t i;
 
 	// Making sure the starting point is valid - some cases mean that starting_point might be passed in as -1
@@ -54,6 +63,10 @@ static int16_t find_in_char_array(char *array, uint16_t length, char character_t
 }
 
 static uint8_t nmea_checksum(char *nmea_sentence, uint8_t length){
+	/**
+	 * Calculates and checks NMEA sentence checksums
+	 * Returns 1 for a correct checksum, and 0 for incorrect checksums
+	*/
 	int16_t checksum_pos;
 	uint8_t i, checksum_calc = 0, checksum_sentence;
 
@@ -78,6 +91,12 @@ static uint8_t nmea_checksum(char *nmea_sentence, uint8_t length){
 }
 
 static void update_data(neo_m8_obj_t *self){
+	/**
+	 * Handles updating the NMEA sentences stored in the driver object
+	 * Looks for the start/end of the NMEA sentence, copies that over into the object, and removes that section from the buffer
+	 * Then works out the sentence type and stores it accordingly
+	 * Times out after 1 second of running
+	*/
 	uint8_t sentences_read = 0;
 	int16_t start_pos = -1, end_pos = -1;
 	uint32_t start_time = mp_hal_ticks_ms();
@@ -85,7 +104,7 @@ static void update_data(neo_m8_obj_t *self){
 
 	while (sentences_read < 5){
 		// Timeout for the function. If it's running for more than 1 second, then the function quits and raises an error
-		if (mp_hal_ticks_ms() - start_time > 1500){
+		if (mp_hal_ticks_ms() - start_time > 1000){
 			mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("Function timed out - no valid NMEA data found in buffer."));
 		}
 
@@ -177,6 +196,9 @@ static void update_data(neo_m8_obj_t *self){
 }
 
 static char* extract_timestamp(char *nmea_section){
+	/**
+	 * Utility to take a segment of an NMEA sentence containing the timestamp and format it into a nice, human-readable form.
+	*/
 	char *timestamp = (char *) malloc(9*CHAR_SIZE);
 
 	if (timestamp == NULL){
@@ -197,6 +219,9 @@ static char* extract_timestamp(char *nmea_section){
 }
 
 static float* extract_lat_long(char *nmea_section){
+	/**
+	 * Utility to take the latitude/longitude section of an NMEA sentence and convert it into degrees and decimal minutes
+	*/
 	uint8_t i;
 	int8_t pos_degrees_end, degrees;
 	float minutes;
@@ -243,6 +268,10 @@ static float* extract_lat_long(char *nmea_section){
 }
 
 static void update_buffer_internal(neo_m8_obj_t *self){
+	/**
+	 * Internal C function that updates the 512-byte NMEA data buffer
+	 * Functions as a sliding window buffer - only holds the most recent 512 bytes of data
+	*/
 	mp_buffer_info_t buf_info;
 	mp_obj_t any_method[2], read_method[2];
 	uint16_t copy_start, new_bytes_copy_start = 0;
@@ -311,7 +340,7 @@ static void update_buffer_internal(neo_m8_obj_t *self){
 
 mp_obj_t update_buffer(mp_obj_t self_in){
 	/**
-	 * Micropython-exposed method to call the internal C buffer update method
+	 * Micropython-exposed function to call the internal C buffer update method
 	*/
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
@@ -322,6 +351,11 @@ mp_obj_t update_buffer(mp_obj_t self_in){
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_update_buffer_obj, update_buffer);
 
 mp_obj_t position(mp_obj_t self_in){
+	/**
+	 * Micropython-exposed function
+	 * Returns location data: latitude, longitude, position error, timestamp
+	 *                    |degrees/decimal minutes|    meters    | GMT hh:mm:ss
+	*/
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
 	mp_obj_t retvals;
@@ -375,6 +409,11 @@ mp_obj_t position(mp_obj_t self_in){
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_position_obj, position);
 
 mp_obj_t velocity(mp_obj_t self_in){
+	/**
+	 * Micropython-exposed function
+	 * Returns velocity and course data - speed over ground (knots), course over ground (degrees), timestamp (GMT hh:mm:ss)
+	 * Course over ground is returned as Python Nonetype if not availible due to speed being too low
+	*/
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
 	mp_obj_t retvals;
@@ -421,6 +460,10 @@ mp_obj_t velocity(mp_obj_t self_in){
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_velocity_obj, velocity);
 
 mp_obj_t altitude(mp_obj_t self_in){
+	/**
+	 * Micropython-exposed function
+	 * Returns altitude data - altitude AMSL (meters), geoid separation (meters), vertical error (meters), timestamp (GMT hh:mm:ss)
+	*/
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
 	mp_obj_t retvals;
@@ -479,6 +522,15 @@ mp_obj_t altitude(mp_obj_t self_in){
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_altitude_obj, altitude);
 
 mp_obj_t getdata(mp_obj_t self_in){
+	/**
+	 * Micropython-exposed function
+	 * Returns all availible GPS data - latitude, longitude, position error, altitude, vertical error, speed over ground, course over ground, geoid separation, timestamp
+	 * Latitude/longitude: degrees and decimal minutes
+	 * Position error/altitude/vertical error/geoid separation: meters
+	 * Speed over ground: Knots
+	 * Couse over ground: degrees (or Python Nonetype if speed too low to calculate course)
+	 * Timestamp: GMT hh:mm:ss
+	*/
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
 	mp_obj_t retvals;
