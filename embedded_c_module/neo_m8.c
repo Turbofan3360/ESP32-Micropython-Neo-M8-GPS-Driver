@@ -380,7 +380,7 @@ mp_obj_t velocity(mp_obj_t self_in){
 	mp_obj_t retvals;
 	uint8_t i;
 	char *rmc_split[13], *timestamp;
-	float sog, cog, mag_var;
+	float sog, cog;
 
 	update_data(self);
 
@@ -393,7 +393,7 @@ mp_obj_t velocity(mp_obj_t self_in){
 	}
 
 	if ((i < 11) || (strcmp(rmc_split[2], "A") != 0)){
-		return mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
+		return mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
 	}
 
 	// Extracting timestamp
@@ -405,14 +405,7 @@ mp_obj_t velocity(mp_obj_t self_in){
 	// Extracting COG (degrees)
 	cog = atof(rmc_split[8]);
 
-	// Extracting magnetic variation (degrees)
-	mag_var = atof(rmc_split[10]);
-
-	if (strcmp(rmc_split[11], "W") == 0){
-		mag_var *= -1;
-	}
-
-	retvals = mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(sog), mp_obj_new_float(cog), mp_obj_new_float(mag_var), mp_obj_new_str(timestamp, 8)});
+	retvals = mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(sog), mp_obj_new_float(cog), mp_obj_new_str(timestamp, 8)});
 
 	free(timestamp);
 
@@ -484,7 +477,7 @@ mp_obj_t getdata(mp_obj_t self_in){
 	mp_obj_t retvals;
 	uint8_t i;
 	char *gga_split[15], *rmc_split[13], *timestamp, **gsa_split = NULL;
-	float *latitude, *longitude, pos_error, altitude, geo_sep, verterror, sog, cog, mag_var;
+	float *latitude, *longitude, pos_error, altitude, geo_sep, verterror, sog, cog;
 
 	update_data(self);
 
@@ -572,18 +565,11 @@ mp_obj_t getdata(mp_obj_t self_in){
 	// Extracting COG (degrees)
 	cog = atof(rmc_split[8]);
 
-	// Extracting magnetic variation (degrees)
-	mag_var = atof(rmc_split[10]);
-
-	if (strcmp(rmc_split[11], "W") == 0){
-		mag_var *= -1;
-	}
-
 	retvals = mp_obj_new_list(10, (mp_obj_t[10]){mp_obj_new_float(*latitude), mp_obj_new_float(*longitude),
 													mp_obj_new_float(pos_error), mp_obj_new_float(altitude),
 													mp_obj_new_float(verterror), mp_obj_new_float(sog),
-													mp_obj_new_float(cog), mp_obj_new_float(mag_var),
-													mp_obj_new_float(geo_sep), mp_obj_new_str(timestamp, 8)});
+													mp_obj_new_float(cog), mp_obj_new_float(geo_sep),
+													mp_obj_new_str(timestamp, 8)});
 
 	free(timestamp);
 	free(latitude);
