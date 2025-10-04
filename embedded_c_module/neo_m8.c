@@ -392,8 +392,8 @@ mp_obj_t velocity(mp_obj_t self_in){
 		token = strtok(NULL, ",");
 	}
 
-	if ((i < 11) || (strcmp(rmc_split[2], "A") != 0)){
-		return mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
+	if ((i < 8) || (strcmp(rmc_split[2], "A") != 0)){
+		return mp_obj_new_list(3, (mp_obj_t[3]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
 	}
 
 	// Extracting timestamp
@@ -405,7 +405,14 @@ mp_obj_t velocity(mp_obj_t self_in){
 	// Extracting COG (degrees)
 	cog = atof(rmc_split[8]);
 
-	retvals = mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(sog), mp_obj_new_float(cog), mp_obj_new_str(timestamp, 8)});
+	// If the COG is > 360 degrees, it means it's picked out the "date" field instead
+	// Which happens if the SOG isn't high enough for an accurate COG to be calculate. So None is returned instead
+	if (cog > 360.0f){
+		retvals = mp_obj_new_list(3, (mp_obj_t[3]){mp_obj_new_float(sog), mp_const_none, mp_obj_new_str(timestamp, 8)});
+	}
+	else {
+		retvals = mp_obj_new_list(3, (mp_obj_t[3]){mp_obj_new_float(sog), mp_obj_new_float(cog), mp_obj_new_str(timestamp, 8)});
+	}
 
 	free(timestamp);
 
@@ -475,7 +482,7 @@ mp_obj_t getdata(mp_obj_t self_in){
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
 	mp_obj_t retvals;
-	uint8_t i;
+	uint8_t i, j;
 	char *gga_split[15], *rmc_split[13], *timestamp, **gsa_split = NULL;
 	float *latitude, *longitude, pos_error, altitude, geo_sep, verterror, sog, cog;
 
@@ -489,28 +496,20 @@ mp_obj_t getdata(mp_obj_t self_in){
 		token = strtok(NULL, ",");
 	}
 
-	if ((i < 13) || (strcmp(gga_split[6], "1") != 0)){
-		return mp_obj_new_list(10, (mp_obj_t[10]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
-													mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
-													mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
-													mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
-													mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
-	}
-
 	// Splitting the RMC sentence up into sections, which can then be processed
 	token = strtok(self->data.rmc, ",");
-	for (i = 0; token != NULL; i++){
-		rmc_split[i] = token;
+	for (j = 0; token != NULL; j++){
+		rmc_split[j] = token;
 
 		token = strtok(NULL, ",");
 	}
 
-	if ((i < 8) || (strcmp(rmc_split[2], "A") != 0)){
-		return mp_obj_new_list(10, (mp_obj_t[10]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
+	if ((i < 13) || (strcmp(gga_split[6], "1") != 0) || (j < 8) || (strcmp(rmc_split[2], "A") != 0)){
+		return mp_obj_new_list(9, (mp_obj_t[9]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
 													mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
 													mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
-													mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
-													mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
+													mp_const_none, mp_obj_new_float(0.0f),
+													mp_obj_new_str("0", 1)});
 	}
 
 	// Extracting GMT timestamp in hh:mm:ss format
@@ -565,11 +564,22 @@ mp_obj_t getdata(mp_obj_t self_in){
 	// Extracting COG (degrees)
 	cog = atof(rmc_split[8]);
 
-	retvals = mp_obj_new_list(10, (mp_obj_t[10]){mp_obj_new_float(*latitude), mp_obj_new_float(*longitude),
+	// If the COG is > 360 degrees, it means it's picked out the "date" field instead
+	// Which happens if the SOG isn't high enough for an accurate COG to be calculate. So None is returned instead
+	if (cog > 360.0f){
+		retvals = mp_obj_new_list(9, (mp_obj_t[9]){mp_obj_new_float(*latitude), mp_obj_new_float(*longitude),
 													mp_obj_new_float(pos_error), mp_obj_new_float(altitude),
 													mp_obj_new_float(verterror), mp_obj_new_float(sog),
-													mp_obj_new_float(cog), mp_obj_new_float(geo_sep),
+													mp_const_none, mp_obj_new_float(geo_sep),
 													mp_obj_new_str(timestamp, 8)});
+	}
+	else {
+		retvals = mp_obj_new_list(9, (mp_obj_t[9]){mp_obj_new_float(*latitude), mp_obj_new_float(*longitude),
+														mp_obj_new_float(pos_error), mp_obj_new_float(altitude),
+														mp_obj_new_float(verterror), mp_obj_new_float(sog),
+														mp_obj_new_float(cog), mp_obj_new_float(geo_sep),
+														mp_obj_new_str(timestamp, 8)});
+	}
 
 	free(timestamp);
 	free(latitude);
