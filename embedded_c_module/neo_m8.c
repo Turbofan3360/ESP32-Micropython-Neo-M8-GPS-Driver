@@ -643,6 +643,63 @@ mp_obj_t getdata(mp_obj_t self_in){
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_getdata_obj, getdata);
 
+mp_obj_t gnss_stop(mp_obj_t self_in){
+	/**
+	 * Function to softly shut down the NEO-M8's GNSS systems
+	 * Can be used for power saving as well as just turning it off
+	*/
+	mp_obj_t write_method[2];
+	nlr_buf_t cpu_state;
+
+	// Defining the UBX-CFG-RST packet to send
+	mp_obj_t packet[3] = {write_method[0], write_method[1],
+		mp_obj_new_bytes((const byte[12]){0xB5, 0x62, 0x06, 0x04, 0x04, 0x00, 0x00, 0x00, 0x08, 0x00, 0x16, 0x74}, 12)};
+
+	if (nlr_push(&cpu_state) == 0){
+		// Loads the UART write method
+		mp_load_method(self->uart_bus, MP_QSTR_write, write_method);
+
+		// Sending the UBX packet
+		mp_call_method_n_kw(1, 0, packet);
+
+		nlr_pop();
+	}
+	else {
+		mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("UART write failed - invalid UART bus object"));
+	}
+
+	return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_gnss_stop_obj, gnss_stop);
+
+mp_obj_t gnss_start(mp_obj_t self_in){
+	/**
+	 * Function to start up the NEO-M8's GNSS systems
+	 * To be used to start the module up again after calling gnss_stop()
+	*/
+	mp_obj_t write_method[2];
+	nlr_buf_t cpu_state;
+
+	// Defining the UBX-CFG-RST packet to send
+	mp_obj_t packet[3] = {write_method[0], write_method[1],
+	    mp_obj_new_bytes((const byte[12]){0xB5, 0x62, 0x06, 0x04, 0x04, 0x00, 0x00, 0x00, 0x09, 0x00, 0x17, 0x76}, 12)};
+
+	if (nlr_push(&cpu_state) == 0){
+		// Loads the UART write method
+		mp_load_method(self->uart_bus, MP_QSTR_write, write_method);
+
+		// Sending the UBX packet
+		mp_call_method_n_kw(1, 0, packet);
+
+		nlr_pop();
+	}
+	else {
+		mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("UART write failed - invalid UART bus object"));
+	}
+
+	return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_gnss_start_obj, gnss_start);
 
 
 
@@ -657,6 +714,8 @@ static const mp_rom_map_elem_t neo_m8_locals_dict_table[] = {
 	{MP_ROM_QSTR(MP_QSTR_velocity), MP_ROM_PTR(&neo_m8_velocity_obj)},
 	{MP_ROM_QSTR(MP_QSTR_altitude), MP_ROM_PTR(&neo_m8_altitude_obj)},
 	{MP_ROM_QSTR(MP_QSTR_getdata), MP_ROM_PTR(&neo_m8_getdata_obj)},
+	{MP_ROM_QSTR(MP_QSTR_gnss_start), MP_ROM_PTR(&neo_m8_gnss_start_obj)},
+	{MP_ROM_QSTR(MP_QSTR_gnss_stop), MP_ROM_PTR(&neo_m8_gnss_stop_obj)},
 };
 static MP_DEFINE_CONST_DICT(neo_m8_locals_dict, neo_m8_locals_dict_table);
 
