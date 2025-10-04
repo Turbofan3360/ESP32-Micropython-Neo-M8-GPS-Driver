@@ -341,8 +341,7 @@ mp_obj_t position(mp_obj_t self_in){
 
 	// If there aren't enough fields (i.e. incomplete sentence, bad data) OR status flag indicates bad fix, then return zeros
 	if ((i < 8) || (strcmp(gga_split[6], "1") != 0)){
-		retvals = mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
-		return retvals;
+		return mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
 	}
 
 	// Extracting GMT timestamp in hh:mm:ss format
@@ -365,7 +364,7 @@ mp_obj_t position(mp_obj_t self_in){
 	// Extracting HDOP value, converting it to horizontal position error
 	pos_error = atof(gga_split[8])*2.5;
 
-	retvals = mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(*latitude), mp_obj_new_float(*longitude), mp_obj_new_float(pos_error), mp_obj_new_str(timestamp, 8)});
+	retvals = mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(latitude), mp_obj_new_float(longitude), mp_obj_new_float(position_error), mp_obj_new_str(timestamp, 8)});
 
 	free(timestamp);
 	free(latitude);
@@ -394,8 +393,7 @@ mp_obj_t velocity(mp_obj_t self_in){
 	}
 
 	if ((i < 8) || (strcmp(rmc_split[2], "A") != 0)){
-		retvals = mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
-		return retvals;
+		return mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
 	}
 
 	// Extracting timestamp
@@ -437,8 +435,7 @@ mp_obj_t altitude(mp_obj_t self_in){
 	}
 
 	if ((i < 13) || (strcmp(gga_split[6], "1") != 0)){
-		retvals = mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_int(0.0f), mp_obj_new_str("0", 1)});
-		return retvals;
+		return mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
 	}
 
 	// Extracting timestamp
@@ -477,6 +474,114 @@ mp_obj_t altitude(mp_obj_t self_in){
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_altitude_obj, altitude);
 
+mp_obj_t getdata(mp_obj_t self_in){
+	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
+
+	mp_obj_t retvals;
+	uint8_t i;
+	char *gga_split[15], *rmc_split[13], *timestamp, **gsa_split = NULL;
+	float *latitude, *longitude, pos_error, altitude, geo_sep, verterror, sog, cog, mag_var;
+
+	update_data(self);
+
+	// Splitting the GGA sentence up into sections, which can then be processed
+	char *token = strtok(self->data.gga, ",");
+	for (i = 0; token != NULL; i++){
+		gga_split[i] = token;
+
+		token = strtok(NULL, ",");
+	}
+
+	if ((i < 13) || (strcmp(gga_split[6], "1") != 0)){
+		return mp_obj_new_list(10, (mp_obj_t[10]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
+													mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
+													mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
+													mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
+													mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
+	}
+
+	// Splitting the RMC sentence up into sections, which can then be processed
+	char *token = strtok(self->data.rmc, ",");
+	for (i = 0; token != NULL; i++){
+		rmc_split[i] = token;
+
+		token = strtok(NULL, ",");
+	}
+
+	if ((i < 8) || (strcmp(rmc_split[2], "A") != 0)){
+		return mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
+	}
+
+	// Extracting GMT timestamp in hh:mm:ss format
+	timestamp = extract_timestamp(gga_split[1]);
+
+	// Extracting latitude in degrees decimal minutes
+	latitude = extract_lat_long(gga_split[2]);
+
+	if (strcmp(gga_split[3], "S") == 0){
+		*latitude *= -1;
+	}
+
+	// Extracting longitude in degrees decimal minutes
+	longitude = extract_lat_long(gga_split[4]);
+
+	if (strcmp(gga_split[5], "W") == 0){
+		*longitude *= -1;
+	}
+
+	// Extracting HDOP value, converting it to horizontal position error
+	pos_error = atof(gga_split[8])*2.5;
+
+	// Extracting altitude
+	altitude = atof(gga_split[9]);
+
+	// Extracting geoid separation
+	geo_sep = atof(gga_split[11]);
+
+	// Extracting vertical error
+	token = strtok(self->data.gsa, ",");
+	for (i = 0; token != NULL; i++){
+		// Re-allocating extended memory - the length of the GSA sentence is unknown
+		gsa_split = (char **) realloc(gsa_split, (i+1)*CHAR_PTR_SIZE);
+
+		if (gsa_split == NULL){
+			free(timestamp);
+			free(latitude);
+			free(longitude);
+			mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
+		}
+
+		gsa_split[i] = token;
+
+		token = strtok(NULL, ",");
+	}
+
+	verterror = atof(gsa_split[i-1])*5;
+
+	// Extracting SOG (knots)
+	sog = atof(rmc_split[7]);
+
+	// Extracting COG (degrees)
+	cog = atof(rmc_split[8]);
+
+	// Extracting magnetic variation (degrees)
+	mag_var = atof(rmc_split[9]);
+
+	retvals = mp_obj_new_list(10, (mp_obj_t[10]){mp_obj_new_float(latitude), mp_obj_new_float(longitude),
+													mp_obj_new_float(pos_error), mp_obj_new_float(altitude),
+													mp_obj_new_float(verterror), mp_obj_new_float(sog),
+													mp_obj_new_float(cog), mp_obj_new_float(mag_var),
+													mp_obj_new_float(geo_sep), mp_obj_new_str(timestamp, 8)});
+
+	free(timestamp);
+	free(latitude);
+	free(longitude);
+	free(gsa_split);
+
+	return retvals;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_getdata_obj, getdata);
+
 
 
 
@@ -490,6 +595,7 @@ static const mp_rom_map_elem_t neo_m8_locals_dict_table[] = {
 	{MP_ROM_QSTR(MP_QSTR_position), MP_ROM_PTR(&neo_m8_position_obj)},
 	{MP_ROM_QSTR(MP_QSTR_velocity), MP_ROM_PTR(&neo_m8_velocity_obj)},
 	{MP_ROM_QSTR(MP_QSTR_altitude), MP_ROM_PTR(&neo_m8_altitude_obj)},
+	{MP_ROM_QSTR(MP_QSTR_get_data), MP_ROM_PTR(&neo_m8_getdata_obj)},
 };
 static MP_DEFINE_CONST_DICT(neo_m8_locals_dict, neo_m8_locals_dict_table);
 
