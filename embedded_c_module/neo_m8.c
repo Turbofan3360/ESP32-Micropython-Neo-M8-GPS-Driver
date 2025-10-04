@@ -364,7 +364,7 @@ mp_obj_t position(mp_obj_t self_in){
 	// Extracting HDOP value, converting it to horizontal position error
 	pos_error = atof(gga_split[8])*2.5;
 
-	retvals = mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(latitude), mp_obj_new_float(longitude), mp_obj_new_float(position_error), mp_obj_new_str(timestamp, 8)});
+	retvals = mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(*latitude), mp_obj_new_float(*longitude), mp_obj_new_float(pos_error), mp_obj_new_str(timestamp, 8)});
 
 	free(timestamp);
 	free(latitude);
@@ -406,7 +406,11 @@ mp_obj_t velocity(mp_obj_t self_in){
 	cog = atof(rmc_split[8]);
 
 	// Extracting magnetic variation (degrees)
-	mag_var = atof(rmc_split[9]);
+	mag_var = atof(rmc_split[10]);
+
+	if (strncmp(rmc_split[11], "W") == 0){
+		mag_var *= -1;
+	}
 
 	retvals = mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(sog), mp_obj_new_float(cog), mp_obj_new_float(mag_var), mp_obj_new_str(timestamp, 8)});
 
@@ -501,7 +505,7 @@ mp_obj_t getdata(mp_obj_t self_in){
 	}
 
 	// Splitting the RMC sentence up into sections, which can then be processed
-	char *token = strtok(self->data.rmc, ",");
+	token = strtok(self->data.rmc, ",");
 	for (i = 0; token != NULL; i++){
 		rmc_split[i] = token;
 
@@ -509,7 +513,11 @@ mp_obj_t getdata(mp_obj_t self_in){
 	}
 
 	if ((i < 8) || (strcmp(rmc_split[2], "A") != 0)){
-		return mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
+		return mp_obj_new_list(10, (mp_obj_t[10]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
+													mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
+													mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
+													mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
+													mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
 	}
 
 	// Extracting GMT timestamp in hh:mm:ss format
@@ -565,9 +573,13 @@ mp_obj_t getdata(mp_obj_t self_in){
 	cog = atof(rmc_split[8]);
 
 	// Extracting magnetic variation (degrees)
-	mag_var = atof(rmc_split[9]);
+	mag_var = atof(rmc_split[10]);
 
-	retvals = mp_obj_new_list(10, (mp_obj_t[10]){mp_obj_new_float(latitude), mp_obj_new_float(longitude),
+	if (strncmp(rmc_split[11], "W") == 0){
+		mag_var *= -1;
+	}
+
+	retvals = mp_obj_new_list(10, (mp_obj_t[10]){mp_obj_new_float(*latitude), mp_obj_new_float(*longitude),
 													mp_obj_new_float(pos_error), mp_obj_new_float(altitude),
 													mp_obj_new_float(verterror), mp_obj_new_float(sog),
 													mp_obj_new_float(cog), mp_obj_new_float(mag_var),
@@ -595,7 +607,7 @@ static const mp_rom_map_elem_t neo_m8_locals_dict_table[] = {
 	{MP_ROM_QSTR(MP_QSTR_position), MP_ROM_PTR(&neo_m8_position_obj)},
 	{MP_ROM_QSTR(MP_QSTR_velocity), MP_ROM_PTR(&neo_m8_velocity_obj)},
 	{MP_ROM_QSTR(MP_QSTR_altitude), MP_ROM_PTR(&neo_m8_altitude_obj)},
-	{MP_ROM_QSTR(MP_QSTR_get_data), MP_ROM_PTR(&neo_m8_getdata_obj)},
+	{MP_ROM_QSTR(MP_QSTR_getdata), MP_ROM_PTR(&neo_m8_getdata_obj)},
 };
 static MP_DEFINE_CONST_DICT(neo_m8_locals_dict, neo_m8_locals_dict_table);
 
