@@ -705,6 +705,53 @@ mp_obj_t gnss_start(mp_obj_t self_in){
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_gnss_start_obj, gnss_start);
 
+mp_obj_t setrate(mp_obj_t self_in, mp_obj_t rate, mp_obj_t measurements_per_nav_sol){
+	/**
+	 * Function to change rate of new navigation solutions output for the NEO-M8
+	*/
+	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
+	nlr_buf_t cpu_state;
+	mp_obj_t write_method[2];
+
+	float mp_rate = mp_obj_get_float(rate);
+	if ((mp_rate < 0) || (mp_rate > 10)){
+		mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Invalid GPS data output rate. Rate must be between 0 and 10 Hz."));
+	}
+
+	uint8_t ms_rate = (uint8_t)(1000/mp_rate), measurements_nav_sol = mp_obj_get_uint(measurements_per_nav_sol);
+	uint8_t i, ck_a = 0, ck_b = 0;
+
+	if (nlr_push(&cpu_state) == 0){
+		// Loading UART write method
+		mp_load_method(self->uart_bus, MP_QSTR_write, write_method);
+
+		uint8_t bytes_packet[8] = {0x06, 0x08, 0x06, 0x00, ms_rate, measurements_nav_sol, 0x00, 0x00};
+
+		// Calculating the UBX checksum
+		for (i = 0; i < 8; i++){
+			ck_a += bytes_packet[i];
+			ck_b += ck_a;
+		}
+		ck_a &= 0xFF;
+		ck_b &= 0xFF;
+
+		// Putting together the final data packet
+		mp_obj_t packet[3] = {write_method[0], write_method[1],
+			mp_obj_new_bytes((const byte[12]){0xB5, 0x62, 0x06, 0x08, 0x06, 0x00, ms_rate, measurements_nav_sol, 0x00, 0x00, ck_a, ck_b}, 12)};
+
+		// Writing the packet to the UART
+		mp_call_method_n_kw(1, 0, packet);
+
+		nlr_pop();
+	}
+	else {
+		mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("UART write failed."));
+	}
+
+	return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_3(neo_m8_setrate_obj, setrate);
+
 
 
 /**
@@ -720,6 +767,7 @@ static const mp_rom_map_elem_t neo_m8_locals_dict_table[] = {
 	{MP_ROM_QSTR(MP_QSTR_getdata), MP_ROM_PTR(&neo_m8_getdata_obj)},
 	{MP_ROM_QSTR(MP_QSTR_gnss_start), MP_ROM_PTR(&neo_m8_gnss_start_obj)},
 	{MP_ROM_QSTR(MP_QSTR_gnss_stop), MP_ROM_PTR(&neo_m8_gnss_stop_obj)},
+	{MP_ROM_QSTR(MP_QSTR_setrate), MP_ROM_PTR(&neo_m8_setrate_obj)},
 };
 static MP_DEFINE_CONST_DICT(neo_m8_locals_dict, neo_m8_locals_dict_table);
 
