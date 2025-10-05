@@ -752,6 +752,82 @@ mp_obj_t setrate(mp_obj_t self_in, mp_obj_t rate, mp_obj_t measurements_per_nav_
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(neo_m8_setrate_obj, setrate);
 
+mp_obj_t modulesetup(mp_obj_t self_in){
+	/**
+	 * Configures the module to required settings
+	*/
+	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
+	mp_obj_t write_method[2];
+	nlr_buf_t cpu_state;
+
+	if (nlr_push(&cpu_state) == 0){
+		// Loading UART write method
+		mp_load_method(self->uart_bus, MP_QSTR_write, write_method);
+
+		// UBX-CFG-MSG: Disabling VTG NMEA sentence as it is redundant
+		// Putting together the data packet
+		mp_obj_t packet[3] = {write_method[0], write_method[1],
+			mp_obj_new_bytes((const byte[11]){0xB5, 0x62, 0x06, 0x01, 0x03, 0x00, 0xF0, 0x05, 0x00, 0xFF, 0x19}, 11)};
+
+		// Writing the packet to the UART
+		mp_call_method_n_kw(1, 0, packet);
+
+		// UBX-CFG-NAV5: Configures module to airborne with <4g acceleration, 3D fix only,
+		// satellites 15 degrees above horizon to be used for a fix, static hold at <20cm/s and 1m, automatic UTC standard
+		// Putting together data packet
+		packet[2] = mp_obj_new_bytes((const byte[44]){0xB5, 0x62, 0x06, 0x24, 0x24, 0x00, 0x47, 0x08, 0x08, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xD0, 0x2B}, 44);
+
+		// Writing the packet to the UART
+		mp_call_method_n_kw(1, 0, packet);
+
+		// UBX-CFG-NAVX5: Configures module to min. satellites for navigation=4, max. satellites for navigation=50,
+		// initial fix must be 3D, AssistNow Autonomous turned on, maximum AssistNow Autonomous orbit error=20m
+		// Putting together data packet
+		packet[2] = mp_obj_new_bytes((const byte[48]){0xB5, 0x62, 0x06, 0x23, 0x28, 0x00, 0x00, 0x00, 0x44, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x3C, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2B, 0x19}, 48);
+
+		// Writing the packet to the UART
+		mp_call_method_n_kw(1, 0, packet);
+
+		// UBX-CFG-GNSS: Configures module to enable Galileo, GPS, GLONASS, BeiDou, SBAS
+		// Putting together data packet
+		packet[2] = mp_obj_new_bytes((const byte[52]){0xB5, 0x62, 0x06, 0x3E, 0x2C, 0x00, 0x00, 0x00, 0xFF, 0x05, 0x00, 0x08, 0x10, 0x00, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x03, 0x00, 0x00, 0x01, 0x00, 0x01, 0x02, 0x02, 0x08, 0x00, 0x00, 0x01, 0x00, 0x01, 0x03, 0x08, 0x0E, 0x00, 0x00, 0x01, 0x00, 0x01, 0x06, 0x06, 0x0e, 0x00, 0x00, 0x01, 0x00, 0x01, 0xDA, 0x1A}, 52);
+
+		// Writing the packet to the UART
+		mp_call_method_n_kw(1, 0, packet);
+
+		// UBX-CFG-ITFM: Configures module to enable interference detection, broadband threshold=7dB, continuous wave threshold=20dB, active antenna
+		// Putting together data packet
+		packet[2] = mp_obj_new_bytes((const byte[16]){0xB5, 0x62, 0x06, 0x39, 0x08, 0x00, 0xAD, 0x62, 0xAD, 0x47, 0x00, 0x00, 0x23, 0x1E, 0x8B, 0xF6}, 16);
+
+		// Writing the packet to the UART
+		mp_call_method_n_kw(1, 0, packet);
+
+		// UBX-CFG-CFG: Configures module to save all the above configured settings into the module's programmable flash
+		// This should be changed to saving into battery-backed RAM for NEO-M8Q and NEO-M8M which don't have programmable flash
+        // Do this by changing the byte b'\x02' below for the byte b'\x01' (assuming you have BBR, unless you want to save it into the SPI Flash)
+		// Putting together data packet
+		packet[2] = mp_obj_new_bytes((const byte[21]){0xB5, 0x62, 0x06, 0x09, 0x0D, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1A, 0x00, 0x00, 0x00, 0x00, 0x02, 0x38, 0x57}, 21);
+
+		// Writing the packet to the UART
+		mp_call_method_n_kw(1, 0, packet);
+
+		// UBX-CFG-RST: Completely hardware resets the module
+		// Putting together data packet
+		packet[2] = mp_obj_new_bytes((const byte[12]){0xB5, 0x62, 0x06, 0x04, 0x04, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x0C, 0x5D}, 12);
+
+		// Writing the packet to the UART
+		mp_call_method_n_kw(1, 0, packet);
+
+		nlr_pop();
+	}
+	else {
+		mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("UART write failed."));
+	}
+
+	return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_modulesetup_obj, modulesetup);
+
 
 
 /**
@@ -768,6 +844,7 @@ static const mp_rom_map_elem_t neo_m8_locals_dict_table[] = {
 	{MP_ROM_QSTR(MP_QSTR_gnss_start), MP_ROM_PTR(&neo_m8_gnss_start_obj)},
 	{MP_ROM_QSTR(MP_QSTR_gnss_stop), MP_ROM_PTR(&neo_m8_gnss_stop_obj)},
 	{MP_ROM_QSTR(MP_QSTR_setrate), MP_ROM_PTR(&neo_m8_setrate_obj)},
+	{MP_ROM_QSTR(MP_QSTR_modulesetup), MP_ROM_PTR(&neo_m8_modulesetup_obj)},
 };
 static MP_DEFINE_CONST_DICT(neo_m8_locals_dict, neo_m8_locals_dict_table);
 
