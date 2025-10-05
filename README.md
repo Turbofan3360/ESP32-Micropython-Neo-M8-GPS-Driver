@@ -4,7 +4,7 @@
 
 This code reads data off of a UART pin on the ESP32. The Neo-M8 modules outputs NMEA sentences, which this code then converts into the useful data needed.
 
-This code contains a modulesetup() method to configure the GPS module - this only needs to be run once per module. Please see below for details.
+This code contains a modulesetup() method to configure the GPS module - this only needs to be run once per module, settings are saved into programmable flash (this will need to be change to Battery-Backed RAM for the NEO-M8M/M8Q).
 
 As standard, the module updates its navigation fixes at a rate of 1Hz. This can be changed by calling the setrate() method, which takes two arguments: the first is the navigation solution update rate, while the second is the number of measurements per navigation solution. The setrate() method returns True or False, depending on whether it received an ACK or a NACK (respectively) from the module. If None is returned, that means that the code didn't receive anything from the module.
 
@@ -17,18 +17,6 @@ You can also call gnss_stop() and gnss_start() to stop/start the module's GNSS s
 If there are any issues with the data (i.e. the code can't process it), integer zeros will be returned for those values.
 
 ### Example Usage: ###
-
-```python3
-import gps_reading_data as gps
-
-module = gps.GPSReceive(10, 9)
-
-flag = module.modulesetup()
-while not flag:
-    flag = module.modulesetup()
-```
-
-The above code only needs to be run once per module. It configures the module's settings to be optimal for my usage, and then saves those settings into the programmable flash. If you have a NEO-M8Q or NEO-M8M, the settings need to be saved into bbattery-backed RAM - see the modulesetup() method for details of how to do this.
 
 ```python3
 import gps_reading_data as gps
@@ -49,7 +37,24 @@ To initialise the driver - the parameters the driver expects is the ESP32 pin th
 
 For higher performance, in the embedded_c_module folder you will find the .c, .h and .cmake files to compile the Neo-M8 driver into micropython firmware - there is a guide to compiling this below. 
 
-This is currently still in development - only the update_buffer(), position(), velocity(), altitude() and getdata() methods are availible currently.
+This is currently still in development - the modulesetup() function is yet to be implemented.
+
+Example usage:
+```python3
+from machine import UART
+import NEO_M8
+
+# NOTE: This embedded module requires the UART bus to be passed in - not TX/RX pin numers
+bus = UART(2, baudrate=9600, tx=tx_pin, rx=rx_pin)
+gps = neo_m8.NEO_M8(bus)
+
+gps.setrate(2, 3)
+
+print(gps.position())
+print(gps.altitude())
+print(gps.velocity())
+print(gps.getdata())
+```
 
 ### Compiling the module into firmware: ###
 
