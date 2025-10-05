@@ -37,8 +37,6 @@ To initialise the driver - the parameters the driver expects is the ESP32 pin th
 
 For higher performance, in the embedded_c_module folder you will find the .c, .h and .cmake files to compile the Neo-M8 driver into micropython firmware - there is a guide to compiling this below. 
 
-This is currently still in development - the modulesetup() function is yet to be implemented.
-
 Example usage:
 ```python3
 from machine import UART
@@ -48,6 +46,7 @@ import NEO_M8
 bus = UART(2, baudrate=9600, tx=tx_pin, rx=rx_pin)
 gps = neo_m8.NEO_M8(bus)
 
+gps.modulesetup()
 gps.setrate(2, 3)
 
 print(gps.position())
