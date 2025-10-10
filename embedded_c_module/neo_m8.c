@@ -339,6 +339,40 @@ static void update_buffer_internal(neo_m8_obj_t *self){
 	return;
 }
 
+static int8_t ubx_ack_nack(neo_m8_obj_t *self){
+	uint32_t start_time = mp_hal_ticks_ms();
+	uint8_t i;
+
+	// This function times out after 0.5s of looking for an ACK/NACK
+	while (mp_hal_ticks_ms() - start_time < 500){
+		update_buffer_internal(self);
+
+		// Making sure no buffer underflow is possible
+		if (self->buffer_len < 3) {
+			continue;
+		}
+
+		// Searching for ACKs/NACKs
+		for (i = 0; i < self->buffer_len-3; i++){
+			if ((self->buffer[i] == 0xB5) && (self->buffer[i+1] == 0x62) && (self->buffer[i+2] == 0x05)){
+				// NACK
+				if (self->buffer[i+3] == 0x00){
+					return 0;
+				}
+				// ACK
+				else if (self->buffer[i+3] == 0x01){
+					return 1;
+				}
+			}
+		}
+
+		mp_hal_delay_ms(10);
+	}
+
+	// Nothing found
+	return -1;
+}
+
 mp_obj_t update_buffer(mp_obj_t self_in){
 	/**
 	 * Micropython-exposed function to call the internal C buffer update method
@@ -647,10 +681,12 @@ mp_obj_t gnss_stop(mp_obj_t self_in){
 	/**
 	 * Function to softly shut down the NEO-M8's GNSS systems
 	 * Can be used for power saving as well as just turning it off
+	 * Returns 1 if an ACK was received, 0 if a NACK was received, and -1 if nothing received
 	*/
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 	mp_obj_t write_method[2];
 	nlr_buf_t cpu_state;
+	int8_t flag;
 
 	if (nlr_push(&cpu_state) == 0){
 		// Loads the UART write method
@@ -670,7 +706,9 @@ mp_obj_t gnss_stop(mp_obj_t self_in){
 		mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("UART write failed - invalid UART bus object"));
 	}
 
-	return mp_const_none;
+	flag = ubx_ack_nack(self);
+
+	return mp_obj_new_int_from_int(flag);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_gnss_stop_obj, gnss_stop);
 
@@ -678,10 +716,12 @@ mp_obj_t gnss_start(mp_obj_t self_in){
 	/**
 	 * Function to start up the NEO-M8's GNSS systems
 	 * To be used to start the module up again after calling gnss_stop()
+	 * Returns 1 if an ACK was received, 0 if a NACK was received, and -1 if nothing received
 	*/
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 	mp_obj_t write_method[2];
 	nlr_buf_t cpu_state;
+	int8_t flag;
 
 	if (nlr_push(&cpu_state) == 0){
 		// Loads the UART write method
@@ -701,17 +741,21 @@ mp_obj_t gnss_start(mp_obj_t self_in){
 		mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("UART write failed - invalid UART bus object"));
 	}
 
-	return mp_const_none;
+	flag = ubx_ack_nack(self);
+
+	return mp_obj_new_int_from_int(flag);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_gnss_start_obj, gnss_start);
 
 mp_obj_t setrate(mp_obj_t self_in, mp_obj_t rate, mp_obj_t measurements_per_nav_sol){
 	/**
 	 * Function to change rate of new navigation solutions output for the NEO-M8
+	 * Returns 1 if an ACK was received, 0 if a NACK was received, and -1 if nothing received
 	*/
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 	nlr_buf_t cpu_state;
 	mp_obj_t write_method[2];
+	int8_t flag;
 
 	float mp_rate = mp_obj_get_float(rate);
 	if ((mp_rate < 0) || (mp_rate > 10)){
@@ -748,17 +792,21 @@ mp_obj_t setrate(mp_obj_t self_in, mp_obj_t rate, mp_obj_t measurements_per_nav_
 		mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("UART write failed."));
 	}
 
-	return mp_const_none;
+	flag = ubx_ack_nack(self);
+
+	return mp_obj_new_int_from_int(flag);
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(neo_m8_setrate_obj, setrate);
 
 mp_obj_t modulesetup(mp_obj_t self_in){
 	/**
 	 * Configures the module to required settings
+	 * Returns 1 if an ACK was received, 0 if a NACK was received, and -1 if nothing received
 	*/
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 	mp_obj_t write_method[2];
 	nlr_buf_t cpu_state;
+	int8_t flag;
 
 	if (nlr_push(&cpu_state) == 0){
 		// Loading UART write method
@@ -772,6 +820,14 @@ mp_obj_t modulesetup(mp_obj_t self_in){
 		// Writing the packet to the UART
 		mp_call_method_n_kw(1, 0, packet);
 
+		// Checking for ACK/NACK, returning if no ACK found
+		flag = ubx_ack_nack(self);
+
+		if (flag != 1){
+			nlr_pop();
+			return mp_new_int_from_int(flag)
+		}
+
 		// UBX-CFG-NAV5: Configures module to airborne with <4g acceleration, 3D fix only,
 		// satellites 15 degrees above horizon to be used for a fix, static hold at <20cm/s and 1m, automatic UTC standard
 		// Putting together data packet
@@ -779,6 +835,14 @@ mp_obj_t modulesetup(mp_obj_t self_in){
 
 		// Writing the packet to the UART
 		mp_call_method_n_kw(1, 0, packet);
+
+		// Checking for ACK/NACK, returning if no ACK found
+		flag = ubx_ack_nack(self);
+
+		if (flag != 1){
+			nlr_pop();
+			return mp_new_int_from_int(flag)
+		}
 
 		// UBX-CFG-NAVX5: Configures module to min. satellites for navigation=4, max. satellites for navigation=50,
 		// initial fix must be 3D, AssistNow Autonomous turned on, maximum AssistNow Autonomous orbit error=20m
@@ -788,6 +852,14 @@ mp_obj_t modulesetup(mp_obj_t self_in){
 		// Writing the packet to the UART
 		mp_call_method_n_kw(1, 0, packet);
 
+		// Checking for ACK/NACK, returning if no ACK found
+		flag = ubx_ack_nack(self);
+
+		if (flag != 1){
+			nlr_pop();
+			return mp_new_int_from_int(flag)
+		}
+
 		// UBX-CFG-GNSS: Configures module to enable Galileo, GPS, GLONASS, BeiDou, SBAS
 		// Putting together data packet
 		packet[2] = mp_obj_new_bytes((const byte[52]){0xB5, 0x62, 0x06, 0x3E, 0x2C, 0x00, 0x00, 0x00, 0xFF, 0x05, 0x00, 0x08, 0x10, 0x00, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x03, 0x00, 0x00, 0x01, 0x00, 0x01, 0x02, 0x02, 0x08, 0x00, 0x00, 0x01, 0x00, 0x01, 0x03, 0x08, 0x0E, 0x00, 0x00, 0x01, 0x00, 0x01, 0x06, 0x06, 0x0e, 0x00, 0x00, 0x01, 0x00, 0x01, 0xDA, 0x1A}, 52);
@@ -795,12 +867,28 @@ mp_obj_t modulesetup(mp_obj_t self_in){
 		// Writing the packet to the UART
 		mp_call_method_n_kw(1, 0, packet);
 
+		// Checking for ACK/NACK, returning if no ACK found
+		flag = ubx_ack_nack(self);
+
+		if (flag != 1){
+			nlr_pop();
+			return mp_new_int_from_int(flag)
+		}
+
 		// UBX-CFG-ITFM: Configures module to enable interference detection, broadband threshold=7dB, continuous wave threshold=20dB, active antenna
 		// Putting together data packet
 		packet[2] = mp_obj_new_bytes((const byte[16]){0xB5, 0x62, 0x06, 0x39, 0x08, 0x00, 0xAD, 0x62, 0xAD, 0x47, 0x00, 0x00, 0x23, 0x1E, 0x8B, 0xF6}, 16);
 
 		// Writing the packet to the UART
 		mp_call_method_n_kw(1, 0, packet);
+
+		// Checking for ACK/NACK, returning if no ACK found
+		flag = ubx_ack_nack(self);
+
+		if (flag != 1){
+			nlr_pop();
+			return mp_new_int_from_int(flag)
+		}
 
 		// UBX-CFG-CFG: Configures module to save all the above configured settings into the module's programmable flash
 		// This should be changed to saving into battery-backed RAM for NEO-M8Q and NEO-M8M which don't have programmable flash
@@ -811,6 +899,14 @@ mp_obj_t modulesetup(mp_obj_t self_in){
 		// Writing the packet to the UART
 		mp_call_method_n_kw(1, 0, packet);
 
+		// Checking for ACK/NACK, returning if no ACK found
+		flag = ubx_ack_nack(self);
+
+		if (flag != 1){
+			nlr_pop();
+			return mp_new_int_from_int(flag)
+		}
+
 		// UBX-CFG-RST: Completely hardware resets the module
 		// Putting together data packet
 		packet[2] = mp_obj_new_bytes((const byte[12]){0xB5, 0x62, 0x06, 0x04, 0x04, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x0C, 0x5D}, 12);
@@ -818,13 +914,21 @@ mp_obj_t modulesetup(mp_obj_t self_in){
 		// Writing the packet to the UART
 		mp_call_method_n_kw(1, 0, packet);
 
+		// Checking for ACK/NACK, returning if no ACK found
+		flag = ubx_ack_nack(self);
+
+		if (flag != 1){
+			nlr_pop();
+			return mp_new_int_from_int(flag)
+		}
+
 		nlr_pop();
 	}
 	else {
 		mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("UART write failed."));
 	}
 
-	return mp_const_none;
+	return mp_new_int_from_int(1);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_modulesetup_obj, modulesetup);
 
