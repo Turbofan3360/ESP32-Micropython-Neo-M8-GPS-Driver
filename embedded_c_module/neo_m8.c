@@ -341,20 +341,22 @@ static void update_buffer_internal(neo_m8_obj_t *self){
 
 static int8_t ubx_ack_nack(neo_m8_obj_t *self){
 	uint32_t start_time = mp_hal_ticks_ms();
-	uint8_t i;
+	uint16_t i;
 
 	// This function times out after 0.5s of looking for an ACK/NACK
 	while (mp_hal_ticks_ms() - start_time < 500){
+		mp_hal_delay_ms(10);
 		update_buffer_internal(self);
 
 		// Making sure no buffer underflow is possible
-		if (self->buffer_len < 3) {
+		if (self->buffer_len < 4){
 			continue;
 		}
 
 		// Searching for ACKs/NACKs
 		for (i = 0; i < self->buffer_len-3; i++){
 			if ((self->buffer[i] == 0xB5) && (self->buffer[i+1] == 0x62) && (self->buffer[i+2] == 0x05)){
+
 				// NACK
 				if (self->buffer[i+3] == 0x00){
 					return 0;
@@ -365,8 +367,6 @@ static int8_t ubx_ack_nack(neo_m8_obj_t *self){
 				}
 			}
 		}
-
-		mp_hal_delay_ms(10);
 	}
 
 	// Nothing found
@@ -699,14 +699,13 @@ mp_obj_t gnss_stop(mp_obj_t self_in){
 
 		// Sending the UBX packet
 		mp_call_method_n_kw(1, 0, packet);
+		flag = ubx_ack_nack(self);
 
 		nlr_pop();
 	}
 	else {
 		mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("UART write failed - invalid UART bus object"));
 	}
-
-	flag = ubx_ack_nack(self);
 
 	return mp_obj_new_int(flag);
 }
@@ -734,14 +733,13 @@ mp_obj_t gnss_start(mp_obj_t self_in){
 
 		// Sending the UBX packet
 		mp_call_method_n_kw(1, 0, packet);
+		flag = ubx_ack_nack(self);
 
 		nlr_pop();
 	}
 	else {
 		mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("UART write failed - invalid UART bus object"));
 	}
-
-	flag = ubx_ack_nack(self);
 
 	return mp_obj_new_int(flag);
 }
@@ -785,14 +783,13 @@ mp_obj_t setrate(mp_obj_t self_in, mp_obj_t rate, mp_obj_t measurements_per_nav_
 
 		// Writing the packet to the UART
 		mp_call_method_n_kw(1, 0, packet);
+		flag = ubx_ack_nack(self);
 
 		nlr_pop();
 	}
 	else {
 		mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("UART write failed."));
 	}
-
-	flag = ubx_ack_nack(self);
 
 	return mp_obj_new_int(flag);
 }
