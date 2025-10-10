@@ -708,7 +708,7 @@ mp_obj_t gnss_stop(mp_obj_t self_in){
 
 	flag = ubx_ack_nack(self);
 
-	return mp_obj_new_int_from_int(flag);
+	return mp_obj_new_int(flag);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_gnss_stop_obj, gnss_stop);
 
@@ -743,7 +743,7 @@ mp_obj_t gnss_start(mp_obj_t self_in){
 
 	flag = ubx_ack_nack(self);
 
-	return mp_obj_new_int_from_int(flag);
+	return mp_obj_new_int(flag);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_gnss_start_obj, gnss_start);
 
@@ -794,7 +794,7 @@ mp_obj_t setrate(mp_obj_t self_in, mp_obj_t rate, mp_obj_t measurements_per_nav_
 
 	flag = ubx_ack_nack(self);
 
-	return mp_obj_new_int_from_int(flag);
+	return mp_obj_new_int(flag);
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(neo_m8_setrate_obj, setrate);
 
@@ -825,7 +825,7 @@ mp_obj_t modulesetup(mp_obj_t self_in){
 
 		if (flag != 1){
 			nlr_pop();
-			return mp_new_int_from_int(flag)
+			return mp_obj_new_int(flag);
 		}
 
 		// UBX-CFG-NAV5: Configures module to airborne with <4g acceleration, 3D fix only,
@@ -841,7 +841,7 @@ mp_obj_t modulesetup(mp_obj_t self_in){
 
 		if (flag != 1){
 			nlr_pop();
-			return mp_new_int_from_int(flag)
+			return mp_obj_new_int(flag);
 		}
 
 		// UBX-CFG-NAVX5: Configures module to min. satellites for navigation=4, max. satellites for navigation=50,
@@ -857,7 +857,7 @@ mp_obj_t modulesetup(mp_obj_t self_in){
 
 		if (flag != 1){
 			nlr_pop();
-			return mp_new_int_from_int(flag)
+			return mp_obj_new_int(flag);
 		}
 
 		// UBX-CFG-GNSS: Configures module to enable Galileo, GPS, GLONASS, BeiDou, SBAS
@@ -872,7 +872,7 @@ mp_obj_t modulesetup(mp_obj_t self_in){
 
 		if (flag != 1){
 			nlr_pop();
-			return mp_new_int_from_int(flag)
+			return mp_obj_new_int(flag);
 		}
 
 		// UBX-CFG-ITFM: Configures module to enable interference detection, broadband threshold=7dB, continuous wave threshold=20dB, active antenna
@@ -887,7 +887,7 @@ mp_obj_t modulesetup(mp_obj_t self_in){
 
 		if (flag != 1){
 			nlr_pop();
-			return mp_new_int_from_int(flag)
+			return mp_obj_new_int(flag);
 		}
 
 		// UBX-CFG-CFG: Configures module to save all the above configured settings into the module's programmable flash
@@ -904,7 +904,7 @@ mp_obj_t modulesetup(mp_obj_t self_in){
 
 		if (flag != 1){
 			nlr_pop();
-			return mp_new_int_from_int(flag)
+			return mp_obj_new_int(flag);
 		}
 
 		// UBX-CFG-RST: Completely hardware resets the module
@@ -919,7 +919,7 @@ mp_obj_t modulesetup(mp_obj_t self_in){
 
 		if (flag != 1){
 			nlr_pop();
-			return mp_new_int_from_int(flag)
+			return mp_obj_new_int(flag);
 		}
 
 		nlr_pop();
@@ -928,7 +928,7 @@ mp_obj_t modulesetup(mp_obj_t self_in){
 		mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("UART write failed."));
 	}
 
-	return mp_new_int_from_int(1);
+	return mp_obj_new_int(1);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_modulesetup_obj, modulesetup);
 
