@@ -39,8 +39,8 @@ typedef struct {
 static int16_t find_in_char_array(char *array, uint16_t length, char character_to_look_for, int16_t starting_point);
 static uint8_t nmea_checksum(char *nmea_sentence, uint8_t length);
 static int8_t ubx_ack_nack(neo_m8_obj_t *self);
-static char* extract_timestamp(char *nmea_section);
-static float* extract_lat_long(char *nmea_section);
+static void extract_timestamp(char* nmea_section, char* timestamp_out);
+static void extract_lat_long(char* nmea_section, float* output);
 static void update_data(neo_m8_obj_t *self);
 static void update_buffer_internal(neo_m8_obj_t *self);
 
