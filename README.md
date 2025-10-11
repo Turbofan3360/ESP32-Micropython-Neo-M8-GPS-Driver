@@ -8,6 +8,8 @@ This code contains a modulesetup() method to configure the GPS module - this onl
 
 As standard, the module updates its navigation fixes at a rate of 1Hz. This can be changed by calling the setrate() method, which takes two arguments: the first is the navigation solution update rate, while the second is the number of measurements per navigation solution. You can also call gnss_stop() and gnss_start() to stop/start the module's GNSS systems. gnss_stop() should be called before pulling the module's power, and these commands can also be used to reduce the module's power consumption when necessary. These methods may have different effects depending on the firmware version of your module.
 
+All the methods that configure GPS module settings return a 1 if an ACK was received from the module, 0 if a NACK was received, and -1 if nothing was received.
+
 To read data, you can call position(), velocity() or altitude() - which returns the relevant data, along with a timestamp. You can also call getdata(), which returns all the data returned individually by those methods.
 
 To get faster GPS data reads, periodically call the update_buffer() method (takes very little time, call it without calling the main data processing methods). This simply loads data from the ESP32's UART RX buffer (defined as 128 bytes long, in this driver) into the driver's 512-byte sliding-window buffer of GPS data. This can reduce GPS data reads down to 0.002 seconds/read in my experiece, compared to 0.5-0.8 seconds/read when not calling the update_buffer() method regularly.
