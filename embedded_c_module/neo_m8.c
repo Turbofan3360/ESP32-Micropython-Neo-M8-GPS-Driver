@@ -195,41 +195,29 @@ static void update_data(neo_m8_obj_t *self){
 	}
 }
 
-static char* extract_timestamp(char *nmea_section){
+static void extract_timestamp(char* nmea_section, char* timestamp_out){
 	/**
 	 * Utility to take a segment of an NMEA sentence containing the timestamp and format it into a nice, human-readable form.
 	*/
-	char *timestamp = (char *) malloc(9*CHAR_SIZE);
 
-	if (timestamp == NULL){
-		mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
-	}
-
-	timestamp[0] = nmea_section[0];
-	timestamp[1] = nmea_section[1];
-	timestamp[2] = ':';
-	timestamp[3] = nmea_section[2];
-	timestamp[4] = nmea_section[3];
-	timestamp[5] = ':';
-	timestamp[6] = nmea_section[4];
-	timestamp[7] = nmea_section[5];
-	timestamp[8] = '\0';
-
-	return timestamp;
+	timestamp_out[0] = nmea_section[0];
+	timestamp_out[1] = nmea_section[1];
+	timestamp_out[2] = ':';
+	timestamp_out[3] = nmea_section[2];
+	timestamp_out[4] = nmea_section[3];
+	timestamp_out[5] = ':';
+	timestamp_out[6] = nmea_section[4];
+	timestamp_out[7] = nmea_section[5];
+	timestamp_out[8] = '\0';
 }
 
-static float* extract_lat_long(char *nmea_section){
+static void extract_lat_long(char* nmea_section, float* output){
 	/**
 	 * Utility to take the latitude/longitude section of an NMEA sentence and convert it into degrees and decimal minutes
 	*/
 	uint8_t i;
 	int8_t pos_degrees_end, degrees;
 	float minutes;
-	float *total = (float *) malloc(FLOAT_SIZE);
-
-	if (total == NULL){
-		mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
-	}
 
 	size_t length = strlen(nmea_section);
 
@@ -237,7 +225,6 @@ static float* extract_lat_long(char *nmea_section){
 	pos_degrees_end = find_in_char_array(nmea_section, length, '.', 0);
 
 	if (pos_degrees_end <= 1){
-		free(total);
 		mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Invalid NMEA sentence input"));
 	}
 
@@ -262,10 +249,8 @@ static float* extract_lat_long(char *nmea_section){
 
 	minutes = atof(minutes_char);
 
-	// Combining them
-	*total = (degrees + minutes/60);
-
-	return total;
+	// Combining and saving them
+	*output = (degrees + minutes/60);
 }
 
 static void update_buffer_internal(neo_m8_obj_t *self){
@@ -339,6 +324,40 @@ static void update_buffer_internal(neo_m8_obj_t *self){
 	return;
 }
 
+static int8_t ubx_ack_nack(neo_m8_obj_t *self){
+	uint32_t start_time = mp_hal_ticks_ms();
+	uint16_t i;
+
+	// This function times out after 1s of looking for an ACK/NACK
+	while (mp_hal_ticks_ms() - start_time < 1000){
+		mp_hal_delay_ms(10);
+		update_buffer_internal(self);
+
+		// Making sure no buffer underflow is possible
+		if (self->buffer_len < 4){
+			continue;
+		}
+
+		// Searching for ACKs/NACKs
+		for (i = 0; i < self->buffer_len-3; i++){
+			if (((uint8_t)self->buffer[i] == 0xB5) && ((uint8_t)self->buffer[i+1] == 0x62) && ((uint8_t)self->buffer[i+2] == 0x05)){
+
+				// NACK
+				if ((uint8_t)self->buffer[i+3] == 0x00){
+					return 0;
+				}
+				// ACK
+				else if ((uint8_t)self->buffer[i+3] == 0x01){
+					return 1;
+				}
+			}
+		}
+	}
+
+	// Nothing found
+	return -1;
+}
+
 mp_obj_t update_buffer(mp_obj_t self_in){
 	/**
 	 * Micropython-exposed function to call the internal C buffer update method
@@ -359,10 +378,9 @@ mp_obj_t position(mp_obj_t self_in){
 	*/
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
-	mp_obj_t retvals;
 	uint8_t i;
-	char *gga_split[9], *timestamp;
-	float *latitude, *longitude, pos_error;
+	char *gga_split[9], timestamp[9];
+	float latitude, longitude, pos_error;
 
 	update_data(self);
 
@@ -380,32 +398,26 @@ mp_obj_t position(mp_obj_t self_in){
 	}
 
 	// Extracting GMT timestamp in hh:mm:ss format
-	timestamp = extract_timestamp(gga_split[1]);
+	extract_timestamp(gga_split[1], timestamp);
 
 	// Extracting latitude in degrees decimal minutes
-	latitude = extract_lat_long(gga_split[2]);
+	extract_lat_long(gga_split[2], &latitude);
 
 	if (strcmp(gga_split[3], "S") == 0){
-		*latitude *= -1;
+		latitude *= -1;
 	}
 
 	// Extracting longitude in degrees decimal minutes
-	longitude = extract_lat_long(gga_split[4]);
+	extract_lat_long(gga_split[4], &longitude);
 
 	if (strcmp(gga_split[5], "W") == 0){
-		*longitude *= -1;
+		longitude *= -1;
 	}
 
 	// Extracting HDOP value, converting it to horizontal position error
 	pos_error = atof(gga_split[8])*2.5;
 
-	retvals = mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(*latitude), mp_obj_new_float(*longitude), mp_obj_new_float(pos_error), mp_obj_new_str(timestamp, 8)});
-
-	free(timestamp);
-	free(latitude);
-	free(longitude);
-
-	return retvals;
+	return mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(latitude), mp_obj_new_float(longitude), mp_obj_new_float(pos_error), mp_obj_new_str(timestamp, 8)});
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_position_obj, position);
 
@@ -417,9 +429,8 @@ mp_obj_t velocity(mp_obj_t self_in){
 	*/
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
-	mp_obj_t retvals;
 	uint8_t i;
-	char *rmc_split[13], *timestamp;
+	char *rmc_split[13], timestamp[9];
 	float sog, cog;
 
 	update_data(self);
@@ -437,7 +448,7 @@ mp_obj_t velocity(mp_obj_t self_in){
 	}
 
 	// Extracting timestamp
-	timestamp = extract_timestamp(rmc_split[1]);
+	extract_timestamp(rmc_split[1], timestamp);
 
 	// Extracting SOG (knots)
 	sog = atof(rmc_split[7]);
@@ -448,15 +459,10 @@ mp_obj_t velocity(mp_obj_t self_in){
 	// If the COG is > 360 degrees, it means it's picked out the "date" field instead
 	// Which happens if the SOG isn't high enough for an accurate COG to be calculate. So None is returned instead
 	if (cog > 360.0f){
-		retvals = mp_obj_new_list(3, (mp_obj_t[3]){mp_obj_new_float(sog), mp_const_none, mp_obj_new_str(timestamp, 8)});
-	}
-	else {
-		retvals = mp_obj_new_list(3, (mp_obj_t[3]){mp_obj_new_float(sog), mp_obj_new_float(cog), mp_obj_new_str(timestamp, 8)});
+		return mp_obj_new_list(3, (mp_obj_t[3]){mp_obj_new_float(sog), mp_const_none, mp_obj_new_str(timestamp, 8)});
 	}
 
-	free(timestamp);
-
-	return retvals;
+	return mp_obj_new_list(3, (mp_obj_t[3]){mp_obj_new_float(sog), mp_obj_new_float(cog), mp_obj_new_str(timestamp, 8)});
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_velocity_obj, velocity);
 
@@ -467,9 +473,8 @@ mp_obj_t altitude(mp_obj_t self_in){
 	*/
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
-	mp_obj_t retvals;
 	uint8_t i;
-	char *gga_split[15], *timestamp, **gsa_split = NULL;
+	char *gga_split[15], timestamp[9], **gsa_split = NULL;
 	float altitude, geosep, verterror;
 
 	update_data(self);
@@ -487,7 +492,7 @@ mp_obj_t altitude(mp_obj_t self_in){
 	}
 
 	// Extracting timestamp
-	timestamp = extract_timestamp(gga_split[1]);
+	extract_timestamp(gga_split[1], timestamp);
 
 	// Extracting altitude
 	altitude = atof(gga_split[9]);
@@ -502,7 +507,6 @@ mp_obj_t altitude(mp_obj_t self_in){
 		gsa_split = (char **) realloc(gsa_split, (i+1)*CHAR_PTR_SIZE);
 
 		if (gsa_split == NULL){
-			free(timestamp);
 			mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
 		}
 
@@ -513,12 +517,9 @@ mp_obj_t altitude(mp_obj_t self_in){
 
 	verterror = atof(gsa_split[i-1])*5;
 
-	retvals = mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(altitude), mp_obj_new_float(geosep), mp_obj_new_float(verterror), mp_obj_new_str(timestamp, 8)});
-
-	free(timestamp);
 	free(gsa_split);
 
-	return retvals;
+	return mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(altitude), mp_obj_new_float(geosep), mp_obj_new_float(verterror), mp_obj_new_str(timestamp, 8)});
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_altitude_obj, altitude);
 
@@ -534,10 +535,9 @@ mp_obj_t getdata(mp_obj_t self_in){
 	*/
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
-	mp_obj_t retvals;
 	uint8_t i, j;
-	char *gga_split[15], *rmc_split[13], *timestamp, **gsa_split = NULL;
-	float *latitude, *longitude, pos_error, altitude, geo_sep, verterror, sog, cog;
+	char *gga_split[15], *rmc_split[13], timestamp[9], **gsa_split = NULL;
+	float latitude, longitude, pos_error, altitude, geo_sep, verterror, sog, cog;
 
 	update_data(self);
 
@@ -559,27 +559,27 @@ mp_obj_t getdata(mp_obj_t self_in){
 
 	if ((i < 13) || (strcmp(gga_split[6], "1") != 0) || (j < 8) || (strcmp(rmc_split[2], "A") != 0)){
 		return mp_obj_new_list(9, (mp_obj_t[9]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
-													mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
-													mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
-													mp_const_none, mp_obj_new_float(0.0f),
-													mp_obj_new_str("0", 1)});
+												mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
+												mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
+												mp_const_none, mp_obj_new_float(0.0f),
+												mp_obj_new_str("0", 1)});
 	}
 
 	// Extracting GMT timestamp in hh:mm:ss format
-	timestamp = extract_timestamp(gga_split[1]);
+	extract_timestamp(gga_split[1], timestamp);
 
 	// Extracting latitude in degrees decimal minutes
-	latitude = extract_lat_long(gga_split[2]);
+	extract_lat_long(gga_split[2], &latitude);
 
 	if (strcmp(gga_split[3], "S") == 0){
-		*latitude *= -1;
+		latitude *= -1;
 	}
 
 	// Extracting longitude in degrees decimal minutes
-	longitude = extract_lat_long(gga_split[4]);
+	extract_lat_long(gga_split[4], &longitude);
 
 	if (strcmp(gga_split[5], "W") == 0){
-		*longitude *= -1;
+		longitude *= -1;
 	}
 
 	// Extracting HDOP value, converting it to horizontal position error
@@ -598,9 +598,6 @@ mp_obj_t getdata(mp_obj_t self_in){
 		gsa_split = (char **) realloc(gsa_split, (i+1)*CHAR_PTR_SIZE);
 
 		if (gsa_split == NULL){
-			free(timestamp);
-			free(latitude);
-			free(longitude);
 			mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
 		}
 
@@ -611,6 +608,8 @@ mp_obj_t getdata(mp_obj_t self_in){
 
 	verterror = atof(gsa_split[i-1])*5;
 
+	free(gsa_split);
+
 	// Extracting SOG (knots)
 	sog = atof(rmc_split[7]);
 
@@ -620,26 +619,18 @@ mp_obj_t getdata(mp_obj_t self_in){
 	// If the COG is > 360 degrees, it means it's picked out the "date" field instead
 	// Which happens if the SOG isn't high enough for an accurate COG to be calculate. So None is returned instead
 	if (cog > 360.0f){
-		retvals = mp_obj_new_list(9, (mp_obj_t[9]){mp_obj_new_float(*latitude), mp_obj_new_float(*longitude),
-													mp_obj_new_float(pos_error), mp_obj_new_float(altitude),
-													mp_obj_new_float(verterror), mp_obj_new_float(sog),
-													mp_const_none, mp_obj_new_float(geo_sep),
-													mp_obj_new_str(timestamp, 8)});
-	}
-	else {
-		retvals = mp_obj_new_list(9, (mp_obj_t[9]){mp_obj_new_float(*latitude), mp_obj_new_float(*longitude),
-														mp_obj_new_float(pos_error), mp_obj_new_float(altitude),
-														mp_obj_new_float(verterror), mp_obj_new_float(sog),
-														mp_obj_new_float(cog), mp_obj_new_float(geo_sep),
-														mp_obj_new_str(timestamp, 8)});
+		return mp_obj_new_list(9, (mp_obj_t[9]){mp_obj_new_float(latitude), mp_obj_new_float(longitude),
+												mp_obj_new_float(pos_error), mp_obj_new_float(altitude),
+												mp_obj_new_float(verterror), mp_obj_new_float(sog),
+												mp_const_none, mp_obj_new_float(geo_sep),
+												mp_obj_new_str(timestamp, 8)});
 	}
 
-	free(timestamp);
-	free(latitude);
-	free(longitude);
-	free(gsa_split);
-
-	return retvals;
+	return mp_obj_new_list(9, (mp_obj_t[9]){mp_obj_new_float(latitude), mp_obj_new_float(longitude),
+											mp_obj_new_float(pos_error), mp_obj_new_float(altitude),
+											mp_obj_new_float(verterror), mp_obj_new_float(sog),
+											mp_obj_new_float(cog), mp_obj_new_float(geo_sep),
+											mp_obj_new_str(timestamp, 8)});
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_getdata_obj, getdata);
 
@@ -647,10 +638,12 @@ mp_obj_t gnss_stop(mp_obj_t self_in){
 	/**
 	 * Function to softly shut down the NEO-M8's GNSS systems
 	 * Can be used for power saving as well as just turning it off
+	 * Returns 1 if an ACK was received, 0 if a NACK was received, and -1 if nothing received
 	*/
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 	mp_obj_t write_method[2];
 	nlr_buf_t cpu_state;
+	int8_t flag;
 
 	if (nlr_push(&cpu_state) == 0){
 		// Loads the UART write method
@@ -663,6 +656,7 @@ mp_obj_t gnss_stop(mp_obj_t self_in){
 
 		// Sending the UBX packet
 		mp_call_method_n_kw(1, 0, packet);
+		flag = ubx_ack_nack(self);
 
 		nlr_pop();
 	}
@@ -670,7 +664,7 @@ mp_obj_t gnss_stop(mp_obj_t self_in){
 		mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("UART write failed - invalid UART bus object"));
 	}
 
-	return mp_const_none;
+	return mp_obj_new_int(flag);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_gnss_stop_obj, gnss_stop);
 
@@ -678,10 +672,12 @@ mp_obj_t gnss_start(mp_obj_t self_in){
 	/**
 	 * Function to start up the NEO-M8's GNSS systems
 	 * To be used to start the module up again after calling gnss_stop()
+	 * Returns 1 if an ACK was received, 0 if a NACK was received, and -1 if nothing received
 	*/
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 	mp_obj_t write_method[2];
 	nlr_buf_t cpu_state;
+	int8_t flag;
 
 	if (nlr_push(&cpu_state) == 0){
 		// Loads the UART write method
@@ -694,6 +690,7 @@ mp_obj_t gnss_start(mp_obj_t self_in){
 
 		// Sending the UBX packet
 		mp_call_method_n_kw(1, 0, packet);
+		flag = ubx_ack_nack(self);
 
 		nlr_pop();
 	}
@@ -701,17 +698,19 @@ mp_obj_t gnss_start(mp_obj_t self_in){
 		mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("UART write failed - invalid UART bus object"));
 	}
 
-	return mp_const_none;
+	return mp_obj_new_int(flag);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_gnss_start_obj, gnss_start);
 
 mp_obj_t setrate(mp_obj_t self_in, mp_obj_t rate, mp_obj_t measurements_per_nav_sol){
 	/**
 	 * Function to change rate of new navigation solutions output for the NEO-M8
+	 * Returns 1 if an ACK was received, 0 if a NACK was received, and -1 if nothing received
 	*/
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 	nlr_buf_t cpu_state;
 	mp_obj_t write_method[2];
+	int8_t flag;
 
 	float mp_rate = mp_obj_get_float(rate);
 	if ((mp_rate < 0) || (mp_rate > 10)){
@@ -741,6 +740,7 @@ mp_obj_t setrate(mp_obj_t self_in, mp_obj_t rate, mp_obj_t measurements_per_nav_
 
 		// Writing the packet to the UART
 		mp_call_method_n_kw(1, 0, packet);
+		flag = ubx_ack_nack(self);
 
 		nlr_pop();
 	}
@@ -748,17 +748,19 @@ mp_obj_t setrate(mp_obj_t self_in, mp_obj_t rate, mp_obj_t measurements_per_nav_
 		mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("UART write failed."));
 	}
 
-	return mp_const_none;
+	return mp_obj_new_int(flag);
 }
 static MP_DEFINE_CONST_FUN_OBJ_3(neo_m8_setrate_obj, setrate);
 
 mp_obj_t modulesetup(mp_obj_t self_in){
 	/**
 	 * Configures the module to required settings
+	 * Returns 1 if an ACK was received, 0 if a NACK was received, and -1 if nothing received
 	*/
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 	mp_obj_t write_method[2];
 	nlr_buf_t cpu_state;
+	int8_t flag;
 
 	if (nlr_push(&cpu_state) == 0){
 		// Loading UART write method
@@ -772,6 +774,14 @@ mp_obj_t modulesetup(mp_obj_t self_in){
 		// Writing the packet to the UART
 		mp_call_method_n_kw(1, 0, packet);
 
+		// Checking for ACK/NACK, returning if no ACK found
+		flag = ubx_ack_nack(self);
+
+		if (flag != 1){
+			nlr_pop();
+			return mp_obj_new_int(flag);
+		}
+
 		// UBX-CFG-NAV5: Configures module to airborne with <4g acceleration, 3D fix only,
 		// satellites 15 degrees above horizon to be used for a fix, static hold at <20cm/s and 1m, automatic UTC standard
 		// Putting together data packet
@@ -779,6 +789,14 @@ mp_obj_t modulesetup(mp_obj_t self_in){
 
 		// Writing the packet to the UART
 		mp_call_method_n_kw(1, 0, packet);
+
+		// Checking for ACK/NACK, returning if no ACK found
+		flag = ubx_ack_nack(self);
+
+		if (flag != 1){
+			nlr_pop();
+			return mp_obj_new_int(flag);
+		}
 
 		// UBX-CFG-NAVX5: Configures module to min. satellites for navigation=4, max. satellites for navigation=50,
 		// initial fix must be 3D, AssistNow Autonomous turned on, maximum AssistNow Autonomous orbit error=20m
@@ -788,6 +806,14 @@ mp_obj_t modulesetup(mp_obj_t self_in){
 		// Writing the packet to the UART
 		mp_call_method_n_kw(1, 0, packet);
 
+		// Checking for ACK/NACK, returning if no ACK found
+		flag = ubx_ack_nack(self);
+
+		if (flag != 1){
+			nlr_pop();
+			return mp_obj_new_int(flag);
+		}
+
 		// UBX-CFG-GNSS: Configures module to enable Galileo, GPS, GLONASS, BeiDou, SBAS
 		// Putting together data packet
 		packet[2] = mp_obj_new_bytes((const byte[52]){0xB5, 0x62, 0x06, 0x3E, 0x2C, 0x00, 0x00, 0x00, 0xFF, 0x05, 0x00, 0x08, 0x10, 0x00, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x03, 0x00, 0x00, 0x01, 0x00, 0x01, 0x02, 0x02, 0x08, 0x00, 0x00, 0x01, 0x00, 0x01, 0x03, 0x08, 0x0E, 0x00, 0x00, 0x01, 0x00, 0x01, 0x06, 0x06, 0x0e, 0x00, 0x00, 0x01, 0x00, 0x01, 0xDA, 0x1A}, 52);
@@ -795,12 +821,28 @@ mp_obj_t modulesetup(mp_obj_t self_in){
 		// Writing the packet to the UART
 		mp_call_method_n_kw(1, 0, packet);
 
+		// Checking for ACK/NACK, returning if no ACK found
+		flag = ubx_ack_nack(self);
+
+		if (flag != 1){
+			nlr_pop();
+			return mp_obj_new_int(flag);
+		}
+
 		// UBX-CFG-ITFM: Configures module to enable interference detection, broadband threshold=7dB, continuous wave threshold=20dB, active antenna
 		// Putting together data packet
 		packet[2] = mp_obj_new_bytes((const byte[16]){0xB5, 0x62, 0x06, 0x39, 0x08, 0x00, 0xAD, 0x62, 0xAD, 0x47, 0x00, 0x00, 0x23, 0x1E, 0x8B, 0xF6}, 16);
 
 		// Writing the packet to the UART
 		mp_call_method_n_kw(1, 0, packet);
+
+		// Checking for ACK/NACK, returning if no ACK found
+		flag = ubx_ack_nack(self);
+
+		if (flag != 1){
+			nlr_pop();
+			return mp_obj_new_int(flag);
+		}
 
 		// UBX-CFG-CFG: Configures module to save all the above configured settings into the module's programmable flash
 		// This should be changed to saving into battery-backed RAM for NEO-M8Q and NEO-M8M which don't have programmable flash
@@ -811,6 +853,14 @@ mp_obj_t modulesetup(mp_obj_t self_in){
 		// Writing the packet to the UART
 		mp_call_method_n_kw(1, 0, packet);
 
+		// Checking for ACK/NACK, returning if no ACK found
+		flag = ubx_ack_nack(self);
+
+		if (flag != 1){
+			nlr_pop();
+			return mp_obj_new_int(flag);
+		}
+
 		// UBX-CFG-RST: Completely hardware resets the module
 		// Putting together data packet
 		packet[2] = mp_obj_new_bytes((const byte[12]){0xB5, 0x62, 0x06, 0x04, 0x04, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x0C, 0x5D}, 12);
@@ -818,13 +868,21 @@ mp_obj_t modulesetup(mp_obj_t self_in){
 		// Writing the packet to the UART
 		mp_call_method_n_kw(1, 0, packet);
 
+		// Checking for ACK/NACK, returning if no ACK found
+		flag = ubx_ack_nack(self);
+
+		if (flag != 1){
+			nlr_pop();
+			return mp_obj_new_int(flag);
+		}
+
 		nlr_pop();
 	}
 	else {
 		mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("UART write failed."));
 	}
 
-	return mp_const_none;
+	return mp_obj_new_int(1);
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_modulesetup_obj, modulesetup);
 
