@@ -121,7 +121,7 @@ static void update_data(neo_m8_obj_t *self){
 		char *data_section = (char *) malloc(sentence_length*CHAR_SIZE + 1);
 
 		if (data_section == NULL){
-			mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
+			mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
 		}
 
 		strncpy(data_section, self->buffer + start_pos, sentence_length);
@@ -147,7 +147,7 @@ static void update_data(neo_m8_obj_t *self){
 			if (self->data.gll == NULL){
 				// Error: out of memory
 				free(data_section);
-				mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
+				mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
 			}
 
 			strncpy(self->data.gll, data_section, str_length);
@@ -159,7 +159,7 @@ static void update_data(neo_m8_obj_t *self){
 			if (self->data.gsa == NULL){
 				// Error: out of memory
 				free(data_section);
-				mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
+				mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
 			}
 
 			strncpy(self->data.gsa, data_section, str_length);
@@ -171,7 +171,7 @@ static void update_data(neo_m8_obj_t *self){
 			if (self->data.gga == NULL){
 				// Error: out of memory
 				free(data_section);
-				mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
+				mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
 			}
 
 			strncpy(self->data.gga, data_section, str_length);
@@ -183,7 +183,7 @@ static void update_data(neo_m8_obj_t *self){
 			if (self->data.rmc == NULL){
 				// Error: out of memory
 				free(data_section);
-				mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
+				mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
 			}
 
 			strncpy(self->data.rmc, data_section, str_length);
@@ -507,7 +507,7 @@ mp_obj_t altitude(mp_obj_t self_in){
 		gsa_split = (char **) realloc(gsa_split, (i+1)*CHAR_PTR_SIZE);
 
 		if (gsa_split == NULL){
-			mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
+			mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
 		}
 
 		gsa_split[i] = token;
@@ -598,7 +598,7 @@ mp_obj_t getdata(mp_obj_t self_in){
 		gsa_split = (char **) realloc(gsa_split, (i+1)*CHAR_PTR_SIZE);
 
 		if (gsa_split == NULL){
-			mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("ENOMEM - out of memory."));
+			mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
 		}
 
 		gsa_split[i] = token;
