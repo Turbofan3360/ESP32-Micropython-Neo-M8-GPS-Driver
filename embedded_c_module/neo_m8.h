@@ -11,6 +11,8 @@
 #include "py/mphal.h"
 #include "py/nlr.h"
 
+#include "driver/uart.h"
+
 // Constant definitions
 #define CHAR_SIZE sizeof(char)
 #define CHAR_PTR_SIZE sizeof(char*)
@@ -27,8 +29,9 @@ typedef struct {
 // Object definition
 typedef struct {
 	mp_obj_base_t base;
-	mp_obj_t uart_bus;
-	
+
+	uart_port_t uart_number;
+
 	uint16_t buffer_len;
 	char buffer[513];
 
