@@ -47,7 +47,7 @@ mp_obj_t neo_m8_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, 
 		uart_param_config(uart_num, &uart_config);
 		uart_set_pin(uart_num, uart_tx_pin, uart_rx_pin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
 		// Creating the ESP-IDF UART - 512 byte RXbuf, 128 byte TXbuf
-		uart_driver_install(uart_num, 512, 128, 0, NULL, 0);
+		uart_driver_install(uart_num, 1024, 128, 0, NULL, 0);
 
 		nlr_pop();
 	}
@@ -61,7 +61,6 @@ mp_obj_t neo_m8_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, 
 	// Initialising required data in the "self" object
 	self->base.type = &neo_m8_type;
 	self->uart_number = uart_num;
-	self->buffer_len = 0;
 
 	self->data.gll = NULL;
 	self->data.gsa = NULL;
@@ -122,6 +121,27 @@ static uint8_t nmea_checksum(char *nmea_sentence, uint8_t length){
 	}
 }
 
+static void update_buffer(uart_port_t uart_num, uint16_t* length, uint8_t* buffer){
+	/**
+	 * Function to handle writing data into a 512-byte sliding window buffer
+	*/
+	int16_t length_read;
+
+	if (*length == 512){
+		// Sliding the window a fixed amount
+		memmove(buffer, buffer + 448, 64);
+		*length = 64;
+	}
+
+	length_read = uart_read_bytes(uart_num, buffer + *length, 512 - *length, 1);
+
+	if (length_read < 0){
+		mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("UART reading error"));
+	}
+
+	*length += length_read;
+}
+
 static void update_data(neo_m8_obj_t *self){
 	/**
 	 * Handles updating the NMEA sentences stored in the driver object
@@ -129,10 +149,18 @@ static void update_data(neo_m8_obj_t *self){
 	 * Then works out the sentence type and stores it accordingly
 	 * Times out after 1 second of running
 	*/
-	uint8_t sentences_read = 0;
+	uint8_t sentences_read = 0, data_buffer[512];
+	uint16_t buffer_length = 0;
 	int16_t start_pos = -1, end_pos = -1;
 	uint32_t start_time = mp_hal_ticks_ms();
+	size_t data_bytes_availible;
 	char nmea_sentence_type[4];
+
+	// Checking for potential buffer overflow
+	uart_get_buffered_data_len(self->uart_number, &data_bytes_availible);
+	if (data_bytes_availible > 1000){
+		uart_flush_input(self->uart_number);
+	}
 
 	while (sentences_read < 5){
 		// Timeout for the function. If it's running for more than 1 second, then the function quits and raises an error
@@ -140,11 +168,12 @@ static void update_data(neo_m8_obj_t *self){
 			mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("Function timed out - no valid NMEA data found in buffer."));
 		}
 
-		start_pos = find_in_char_array(self->buffer, self->buffer_len, '$', 0);
-		end_pos = find_in_char_array(self->buffer, self->buffer_len, '\n', start_pos);
+		update_buffer(self->uart_number, &buffer_length, data_buffer);
+
+		start_pos = find_in_char_array((char *) data_buffer, buffer_length, '$', 0);
+		end_pos = find_in_char_array((char *) data_buffer, buffer_length, '\n', start_pos);
 
 		if ((start_pos == -1) || (end_pos == -1)){
-			update_buffer_internal(self);
 			continue;
 		}
 
@@ -156,25 +185,24 @@ static void update_data(neo_m8_obj_t *self){
 			mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
 		}
 
-		strncpy(data_section, self->buffer + start_pos, sentence_length);
+		strncpy(data_section, (char *) (data_buffer + start_pos), sentence_length);
 		data_section[sentence_length] = '\0';
 
 		// Removing the section of the buffer used by the data_section NMEA sentence
-		memmove(self->buffer, self->buffer + end_pos, self->buffer_len - end_pos);
-		self->buffer_len -= end_pos;
+		memmove(data_buffer, data_buffer + end_pos, buffer_length - end_pos);
+		buffer_length -= end_pos;
 
 		// Checking the NMEA checksum
-		if (nmea_checksum(data_section, end_pos-start_pos) == 0){
+		if (nmea_checksum(data_section, sentence_length) == 0){
 			continue;
 		}
 
 		// Finding the type of NMEA sentence it is, then saving it into memory
 		strncpy(nmea_sentence_type, data_section + 3, 3);
 		nmea_sentence_type[3] = '\0';
-		size_t str_length = strlen(data_section);
 
 		if (strcmp(nmea_sentence_type, "GLL") == 0){
-			self->data.gll = (char *) realloc(self->data.gll, str_length*CHAR_SIZE + 1);
+			self->data.gll = (char *) realloc(self->data.gll, sentence_length*CHAR_SIZE + 1);
 
 			if (self->data.gll == NULL){
 				// Error: out of memory
@@ -182,11 +210,11 @@ static void update_data(neo_m8_obj_t *self){
 				mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
 			}
 
-			strncpy(self->data.gll, data_section, str_length);
-			self->data.gll[str_length] = '\0';
+			strncpy(self->data.gll, data_section, sentence_length);
+			self->data.gll[sentence_length] = '\0';
 		}
 		else if(strcmp(nmea_sentence_type, "GSA") == 0){
-			self->data.gsa = (char *) realloc(self->data.gsa, str_length*CHAR_SIZE + 1);
+			self->data.gsa = (char *) realloc(self->data.gsa, sentence_length*CHAR_SIZE + 1);
 
 			if (self->data.gsa == NULL){
 				// Error: out of memory
@@ -194,11 +222,11 @@ static void update_data(neo_m8_obj_t *self){
 				mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
 			}
 
-			strncpy(self->data.gsa, data_section, str_length);
-			self->data.gsa[str_length] = '\0';
+			strncpy(self->data.gsa, data_section, sentence_length);
+			self->data.gsa[sentence_length] = '\0';
 		}
 		else if(strcmp(nmea_sentence_type, "GGA") == 0){
-			self->data.gga = (char *) realloc(self->data.gga, str_length*CHAR_SIZE + 1);
+			self->data.gga = (char *) realloc(self->data.gga, sentence_length*CHAR_SIZE + 1);
 
 			if (self->data.gga == NULL){
 				// Error: out of memory
@@ -206,11 +234,11 @@ static void update_data(neo_m8_obj_t *self){
 				mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
 			}
 
-			strncpy(self->data.gga, data_section, str_length);
-			self->data.gga[str_length] = '\0';
+			strncpy(self->data.gga, data_section, sentence_length);
+			self->data.gga[sentence_length] = '\0';
 		}
 		else if(strcmp(nmea_sentence_type, "RMC") == 0){
-			self->data.rmc = (char *) realloc(self->data.rmc, str_length*CHAR_SIZE + 1);
+			self->data.rmc = (char *) realloc(self->data.rmc, sentence_length*CHAR_SIZE + 1);
 
 			if (self->data.rmc == NULL){
 				// Error: out of memory
@@ -218,8 +246,8 @@ static void update_data(neo_m8_obj_t *self){
 				mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
 			}
 
-			strncpy(self->data.rmc, data_section, str_length);
-			self->data.rmc[str_length] = '\0';
+			strncpy(self->data.rmc, data_section, sentence_length);
+			self->data.rmc[sentence_length] = '\0';
 		}
 
 		sentences_read++;
@@ -285,101 +313,32 @@ static void extract_lat_long(char* nmea_section, float* output){
 	*output = (degrees + minutes/60);
 }
 
-static void update_buffer_internal(neo_m8_obj_t *self){
-	/**
-	 * Internal C function that updates the 512-byte NMEA data buffer
-	 * Functions as a sliding window buffer - only holds the most recent 512 bytes of data
-	*/
-	uint16_t copy_start, new_bytes_copy_start = 0;
-	uint8_t uart_bytes[256];
-	size_t read_length = 0;
-	nlr_buf_t cpu_state;
-
-	if (nlr_push(&cpu_state) == 0){
-		// Checking if there's any data available
-		uart_get_buffered_data_len(self->uart_number, &read_length);
-		if (read_length <= 32){
-			nlr_pop();
-			return;
-		}
-
-		// Getting new UART data and then buffer info from it
-		read_length = uart_read_bytes(self->uart_number, uart_bytes, 256, 1);
-
-		if (read_length == -1){
-			mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("UART read failed"));
-		}
-
-		nlr_pop();
-	}
-	else {
-		mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("UART method failed"));
-	}
-
-	// Finding total number of bytes held
-	uint16_t buffer_total = self->buffer_len + read_length;
-
-	// If there's too many bytes to fill the buffer, then slide the window
-	if (buffer_total > 512){
-		// Finding the point where the most recent 512 bytes starts
-		copy_start = buffer_total - 512;
-
-		// If the most recent 512 bytes starts before the current buffer ends, then copy from old buffer into new one
-		if (copy_start < self->buffer_len){
-			uint16_t old_bytes_copy = self->buffer_len - copy_start;
-
-			// Copying the required bytes from the current buffer into the new buffer
-			memmove(self->buffer, self->buffer + copy_start, old_bytes_copy);
-
-			// Updating the buffer length
-			self->buffer_len = old_bytes_copy;
-		}
-		// If the most recent 512 bytes is after the current buffer window, then discard all buffer data
-		else {
-			new_bytes_copy_start = read_length - 512;
-			self->buffer_len = 0;
-		}
-	}
-
-	// Working out the number of new bytes to copy
-	uint16_t new_bytes_copy = read_length - new_bytes_copy_start;
-
-	// Copying bytes from the new data into the buffer
-	memcpy(self->buffer + self->buffer_len, uart_bytes + new_bytes_copy_start, new_bytes_copy);
-
-	// Updating buffer length
-	self->buffer_len += new_bytes_copy;
-
-	// Ensuring termination character added
-	self->buffer[self->buffer_len] = '\0';
-
-	return;
-}
-
 static int8_t ubx_ack_nack(neo_m8_obj_t *self){
+	uint8_t buffer[512];
 	uint32_t start_time = mp_hal_ticks_ms();
-	uint16_t i;
+	uint16_t i, buffer_length = 0;
 
 	// This function times out after 1s of looking for an ACK/NACK
 	while (mp_hal_ticks_ms() - start_time < 1000){
 		mp_hal_delay_ms(10);
-		update_buffer_internal(self);
+
+		update_buffer(self->uart_number, &buffer_length, buffer);
 
 		// Making sure no buffer underflow is possible
-		if (self->buffer_len < 4){
+		if (buffer_length < 4){
 			continue;
 		}
 
 		// Searching for ACKs/NACKs
-		for (i = 0; i < self->buffer_len-3; i++){
-			if (((uint8_t)self->buffer[i] == 0xB5) && ((uint8_t)self->buffer[i+1] == 0x62) && ((uint8_t)self->buffer[i+2] == 0x05)){
+		for (i = 0; i < buffer_length-3; i++){
+			if ((buffer[i] == 0xB5) && (buffer[i+1] == 0x62) && (buffer[i+2] == 0x05)){
 
 				// NACK
-				if ((uint8_t)self->buffer[i+3] == 0x00){
+				if (buffer[i+3] == 0x00){
 					return 0;
 				}
 				// ACK
-				else if ((uint8_t)self->buffer[i+3] == 0x01){
+				else if (buffer[i+3] == 0x01){
 					return 1;
 				}
 			}
@@ -389,18 +348,6 @@ static int8_t ubx_ack_nack(neo_m8_obj_t *self){
 	// Nothing found
 	return -1;
 }
-
-mp_obj_t update_buffer(mp_obj_t self_in){
-	/**
-	 * Micropython-exposed function to call the internal C buffer update method
-	*/
-	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
-
-	update_buffer_internal(self);
-
-	return mp_const_none;
-}
-static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_update_buffer_obj, update_buffer);
 
 mp_obj_t position(mp_obj_t self_in){
 	/**
@@ -944,7 +891,6 @@ static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_modulesetup_obj, modulesetup);
 
 // Defining the functions that are exposed to micropython
 static const mp_rom_map_elem_t neo_m8_locals_dict_table[] = {
-	{MP_ROM_QSTR(MP_QSTR_update_buffer), MP_ROM_PTR(&neo_m8_update_buffer_obj)},
 	{MP_ROM_QSTR(MP_QSTR_position), MP_ROM_PTR(&neo_m8_position_obj)},
 	{MP_ROM_QSTR(MP_QSTR_velocity), MP_ROM_PTR(&neo_m8_velocity_obj)},
 	{MP_ROM_QSTR(MP_QSTR_altitude), MP_ROM_PTR(&neo_m8_altitude_obj)},

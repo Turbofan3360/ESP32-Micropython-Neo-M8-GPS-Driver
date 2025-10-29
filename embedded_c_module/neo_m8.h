@@ -29,12 +29,7 @@ typedef struct {
 // Object definition
 typedef struct {
 	mp_obj_base_t base;
-
 	uart_port_t uart_number;
-
-	uint16_t buffer_len;
-	char buffer[513];
-
 	nmea_sentences_data data;
 } neo_m8_obj_t;
 
@@ -42,10 +37,10 @@ typedef struct {
 static int16_t find_in_char_array(char *array, uint16_t length, char character_to_look_for, int16_t starting_point);
 static uint8_t nmea_checksum(char *nmea_sentence, uint8_t length);
 static int8_t ubx_ack_nack(neo_m8_obj_t *self);
+static void update_buffer(uart_port_t uart_num, uint16_t* length, uint8_t* buffer);
 static void extract_timestamp(char* nmea_section, char* timestamp_out);
 static void extract_lat_long(char* nmea_section, float* output);
 static void update_data(neo_m8_obj_t *self);
-static void update_buffer_internal(neo_m8_obj_t *self);
 
 extern const mp_obj_type_t neo_m8_type;
 
