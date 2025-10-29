@@ -61,6 +61,7 @@ mp_obj_t neo_m8_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, 
 	// Initialising required data in the "self" object
 	self->base.type = &neo_m8_type;
 	self->uart_number = uart_num;
+	self->buffer_length = 0;
 
 	self->data.gll = NULL;
 	self->data.gsa = NULL;
@@ -121,11 +122,18 @@ static uint8_t nmea_checksum(char *nmea_sentence, uint8_t length){
 	}
 }
 
-static void update_buffer(uart_port_t uart_num, uint16_t* length, uint8_t* buffer){
+static void update_buffer_internal(uart_port_t uart_num, uint16_t* length, uint8_t* buffer){
 	/**
 	 * Function to handle writing data into a 512-byte sliding window buffer
 	*/
 	int16_t length_read;
+	size_t data_bytes_available;
+
+	// Checking for potential buffer overflow
+	uart_get_buffered_data_len(uart_num, &data_bytes_available);
+	if (data_bytes_available > 1000){
+		uart_flush_input(uart_num);
+	}
 
 	if (*length == 512){
 		// Sliding the window a fixed amount
@@ -149,18 +157,10 @@ static void update_data(neo_m8_obj_t *self){
 	 * Then works out the sentence type and stores it accordingly
 	 * Times out after 1 second of running
 	*/
-	uint8_t sentences_read = 0, data_buffer[512];
-	uint16_t buffer_length = 0;
+	uint8_t sentences_read = 0;
 	int16_t start_pos = -1, end_pos = -1;
 	uint32_t start_time = mp_hal_ticks_ms();
-	size_t data_bytes_availible;
 	char nmea_sentence_type[4];
-
-	// Checking for potential buffer overflow
-	uart_get_buffered_data_len(self->uart_number, &data_bytes_availible);
-	if (data_bytes_availible > 1000){
-		uart_flush_input(self->uart_number);
-	}
 
 	while (sentences_read < 5){
 		// Timeout for the function. If it's running for more than 1 second, then the function quits and raises an error
@@ -168,10 +168,10 @@ static void update_data(neo_m8_obj_t *self){
 			mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("Function timed out - no valid NMEA data found in buffer."));
 		}
 
-		update_buffer(self->uart_number, &buffer_length, data_buffer);
+		update_buffer_internal(self->uart_number, &self->buffer_length, self->buffer);
 
-		start_pos = find_in_char_array((char *) data_buffer, buffer_length, '$', 0);
-		end_pos = find_in_char_array((char *) data_buffer, buffer_length, '\n', start_pos);
+		start_pos = find_in_char_array((char *) self->buffer, self->buffer_length, '$', 0);
+		end_pos = find_in_char_array((char *) self->buffer, self->buffer_length, '\n', start_pos);
 
 		if ((start_pos == -1) || (end_pos == -1)){
 			continue;
@@ -185,12 +185,12 @@ static void update_data(neo_m8_obj_t *self){
 			mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
 		}
 
-		strncpy(data_section, (char *) (data_buffer + start_pos), sentence_length);
+		strncpy(data_section, (char *) (self->buffer + start_pos), sentence_length);
 		data_section[sentence_length] = '\0';
 
 		// Removing the section of the buffer used by the data_section NMEA sentence
-		memmove(data_buffer, data_buffer + end_pos, buffer_length - end_pos);
-		buffer_length -= end_pos;
+		memmove(self->buffer, self->buffer + end_pos, self->buffer_length - end_pos);
+		self->buffer_length -= end_pos;
 
 		// Checking the NMEA checksum
 		if (nmea_checksum(data_section, sentence_length) == 0){
@@ -314,31 +314,30 @@ static void extract_lat_long(char* nmea_section, float* output){
 }
 
 static int8_t ubx_ack_nack(neo_m8_obj_t *self){
-	uint8_t buffer[512];
 	uint32_t start_time = mp_hal_ticks_ms();
-	uint16_t i, buffer_length = 0;
+	uint16_t i;
 
 	// This function times out after 1s of looking for an ACK/NACK
 	while (mp_hal_ticks_ms() - start_time < 1000){
 		mp_hal_delay_ms(10);
 
-		update_buffer(self->uart_number, &buffer_length, buffer);
+		update_buffer_internal(self->uart_number, &self->buffer_length, self->buffer);
 
 		// Making sure no buffer underflow is possible
-		if (buffer_length < 4){
+		if (self->buffer_length < 4){
 			continue;
 		}
 
 		// Searching for ACKs/NACKs
-		for (i = 0; i < buffer_length-3; i++){
-			if ((buffer[i] == 0xB5) && (buffer[i+1] == 0x62) && (buffer[i+2] == 0x05)){
+		for (i = 0; i < self->buffer_length-3; i++){
+			if ((self->buffer[i] == 0xB5) && (self->buffer[i+1] == 0x62) && (self->buffer[i+2] == 0x05)){
 
 				// NACK
-				if (buffer[i+3] == 0x00){
+				if (self->buffer[i+3] == 0x00){
 					return 0;
 				}
 				// ACK
-				else if (buffer[i+3] == 0x01){
+				else if (self->buffer[i+3] == 0x01){
 					return 1;
 				}
 			}
@@ -348,6 +347,18 @@ static int8_t ubx_ack_nack(neo_m8_obj_t *self){
 	// Nothing found
 	return -1;
 }
+
+mp_obj_t update_buffer(mp_obj_t self_in){
+	/**
+	 * Exposing the update_buffer_internal function to micropython
+	*/
+	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
+
+	update_buffer_internal(self->uart_number, &self->buffer_length, self->buffer);
+
+	return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_update_buffer_obj, update_buffer);
 
 mp_obj_t position(mp_obj_t self_in){
 	/**
@@ -895,6 +906,7 @@ static const mp_rom_map_elem_t neo_m8_locals_dict_table[] = {
 	{MP_ROM_QSTR(MP_QSTR_velocity), MP_ROM_PTR(&neo_m8_velocity_obj)},
 	{MP_ROM_QSTR(MP_QSTR_altitude), MP_ROM_PTR(&neo_m8_altitude_obj)},
 	{MP_ROM_QSTR(MP_QSTR_getdata), MP_ROM_PTR(&neo_m8_getdata_obj)},
+	{MP_ROM_QSTR(MP_QSTR_update_buffer), MP_ROM_PTR(&neo_m8_update_buffer_obj)},
 	{MP_ROM_QSTR(MP_QSTR_gnss_start), MP_ROM_PTR(&neo_m8_gnss_start_obj)},
 	{MP_ROM_QSTR(MP_QSTR_gnss_stop), MP_ROM_PTR(&neo_m8_gnss_stop_obj)},
 	{MP_ROM_QSTR(MP_QSTR_setrate), MP_ROM_PTR(&neo_m8_setrate_obj)},
