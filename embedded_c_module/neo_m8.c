@@ -5,22 +5,54 @@ mp_obj_t neo_m8_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, 
 	 * Checks all the given arguments, tests the micropython UART object, and handles initialization of the driver
 	 * Also initializes the micropython object which is passed back
 	*/
-	// Checking arguments
-	mp_arg_check_num(n_args, n_kw, 1, 1, false);
-
-	// Testing to see if the UART object is valid (i.e. the required methods can be loaded from it)
+	uart_port_t uart_num;
+	uint8_t uart_tx_pin, uart_rx_pin, uart_id;
 	nlr_buf_t cpu_state;
-	mp_obj_t test_method[2];
+
+	// Checking arguments
+	mp_arg_check_num(n_args, n_kw, 3, 3, false);
+
+	// Getting arguments data
+	uart_tx_pin = mp_obj_get_uint(args[0]);
+	uart_rx_pin = mp_obj_get_int(args[1]);
+	uart_id = mp_obj_get_uint(args[2]);
+
+	// Ensuring UART ID and Pin number are valid - configured for ESP32-S3
+	if ((uart_id != 1) && (uart_id != 2)){
+		mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("UART ID can only be 1 or 2"));
+	}
+	if ((uart_tx_pin > 45) || (uart_rx_pin > 45)){
+		mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Only 45 pins on ESP32-S3: Please enter valid pin number"));
+	}
+
+	if (uart_id == 1){
+		uart_num = UART_NUM_1;
+	}
+	else {
+		uart_num = UART_NUM_2;
+	}
+
+	// Configuring UART parameters
+	uart_config_t uart_config = {
+		.baud_rate = 9600,
+		.data_bits = UART_DATA_8_BITS,
+		.parity = UART_PARITY_DISABLE,
+		.stop_bits = UART_STOP_BITS_1,
+		.flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+		.source_clk = UART_SCLK_DEFAULT,
+	};
 
 	if (nlr_push(&cpu_state) == 0){
-		mp_load_method(args[0], MP_QSTR_any, test_method);
-		mp_load_method(args[0], MP_QSTR_read, test_method);
-		mp_load_method(args[0], MP_QSTR_write, test_method);
+		// Configuring UART
+		uart_param_config(uart_num, &uart_config);
+		uart_set_pin(uart_num, uart_tx_pin, uart_rx_pin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+		// Creating the ESP-IDF UART - 512 byte RXbuf, 128 byte TXbuf
+		uart_driver_install(uart_num, 1024, 128, 0, NULL, 0);
 
 		nlr_pop();
 	}
 	else {
-		mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("UART bus object not valid"));
+		mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("UART object failed to initialize"));
 	}
 
 	// Creating and allocating memory to the "self" instance of this module
@@ -28,8 +60,8 @@ mp_obj_t neo_m8_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, 
 
 	// Initialising required data in the "self" object
 	self->base.type = &neo_m8_type;
-	self->uart_bus = args[0];
-	self->buffer_len = 0;
+	self->uart_number = uart_num;
+	self->buffer_length = 0;
 
 	self->data.gll = NULL;
 	self->data.gsa = NULL;
@@ -90,6 +122,34 @@ static uint8_t nmea_checksum(char *nmea_sentence, uint8_t length){
 	}
 }
 
+static void update_buffer_internal(uart_port_t uart_num, uint16_t* length, uint8_t* buffer){
+	/**
+	 * Function to handle writing data into a 512-byte sliding window buffer
+	*/
+	int16_t length_read;
+	size_t data_bytes_available;
+
+	// Checking for potential buffer overflow
+	uart_get_buffered_data_len(uart_num, &data_bytes_available);
+	if (data_bytes_available > 1000){
+		uart_flush_input(uart_num);
+	}
+
+	if (*length == 512){
+		// Sliding the window a fixed amount
+		memmove(buffer, buffer + 448, 64);
+		*length = 64;
+	}
+
+	length_read = uart_read_bytes(uart_num, buffer + *length, 512 - *length, 1);
+
+	if (length_read < 0){
+		mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("UART reading error"));
+	}
+
+	*length += length_read;
+}
+
 static void update_data(neo_m8_obj_t *self){
 	/**
 	 * Handles updating the NMEA sentences stored in the driver object
@@ -108,11 +168,12 @@ static void update_data(neo_m8_obj_t *self){
 			mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("Function timed out - no valid NMEA data found in buffer."));
 		}
 
-		start_pos = find_in_char_array(self->buffer, self->buffer_len, '$', 0);
-		end_pos = find_in_char_array(self->buffer, self->buffer_len, '\n', start_pos);
+		update_buffer_internal(self->uart_number, &self->buffer_length, self->buffer);
+
+		start_pos = find_in_char_array((char *) self->buffer, self->buffer_length, '$', 0);
+		end_pos = find_in_char_array((char *) self->buffer, self->buffer_length, '\n', start_pos);
 
 		if ((start_pos == -1) || (end_pos == -1)){
-			update_buffer_internal(self);
 			continue;
 		}
 
@@ -124,25 +185,24 @@ static void update_data(neo_m8_obj_t *self){
 			mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
 		}
 
-		strncpy(data_section, self->buffer + start_pos, sentence_length);
+		strncpy(data_section, (char *) (self->buffer + start_pos), sentence_length);
 		data_section[sentence_length] = '\0';
 
 		// Removing the section of the buffer used by the data_section NMEA sentence
-		memmove(self->buffer, self->buffer + end_pos, self->buffer_len - end_pos);
-		self->buffer_len -= end_pos;
+		memmove(self->buffer, self->buffer + end_pos, self->buffer_length - end_pos);
+		self->buffer_length -= end_pos;
 
 		// Checking the NMEA checksum
-		if (nmea_checksum(data_section, end_pos-start_pos) == 0){
+		if (nmea_checksum(data_section, sentence_length) == 0){
 			continue;
 		}
 
 		// Finding the type of NMEA sentence it is, then saving it into memory
 		strncpy(nmea_sentence_type, data_section + 3, 3);
 		nmea_sentence_type[3] = '\0';
-		size_t str_length = strlen(data_section);
 
 		if (strcmp(nmea_sentence_type, "GLL") == 0){
-			self->data.gll = (char *) realloc(self->data.gll, str_length*CHAR_SIZE + 1);
+			self->data.gll = (char *) realloc(self->data.gll, sentence_length*CHAR_SIZE + 1);
 
 			if (self->data.gll == NULL){
 				// Error: out of memory
@@ -150,11 +210,11 @@ static void update_data(neo_m8_obj_t *self){
 				mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
 			}
 
-			strncpy(self->data.gll, data_section, str_length);
-			self->data.gll[str_length] = '\0';
+			strncpy(self->data.gll, data_section, sentence_length);
+			self->data.gll[sentence_length] = '\0';
 		}
 		else if(strcmp(nmea_sentence_type, "GSA") == 0){
-			self->data.gsa = (char *) realloc(self->data.gsa, str_length*CHAR_SIZE + 1);
+			self->data.gsa = (char *) realloc(self->data.gsa, sentence_length*CHAR_SIZE + 1);
 
 			if (self->data.gsa == NULL){
 				// Error: out of memory
@@ -162,11 +222,11 @@ static void update_data(neo_m8_obj_t *self){
 				mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
 			}
 
-			strncpy(self->data.gsa, data_section, str_length);
-			self->data.gsa[str_length] = '\0';
+			strncpy(self->data.gsa, data_section, sentence_length);
+			self->data.gsa[sentence_length] = '\0';
 		}
 		else if(strcmp(nmea_sentence_type, "GGA") == 0){
-			self->data.gga = (char *) realloc(self->data.gga, str_length*CHAR_SIZE + 1);
+			self->data.gga = (char *) realloc(self->data.gga, sentence_length*CHAR_SIZE + 1);
 
 			if (self->data.gga == NULL){
 				// Error: out of memory
@@ -174,11 +234,11 @@ static void update_data(neo_m8_obj_t *self){
 				mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
 			}
 
-			strncpy(self->data.gga, data_section, str_length);
-			self->data.gga[str_length] = '\0';
+			strncpy(self->data.gga, data_section, sentence_length);
+			self->data.gga[sentence_length] = '\0';
 		}
 		else if(strcmp(nmea_sentence_type, "RMC") == 0){
-			self->data.rmc = (char *) realloc(self->data.rmc, str_length*CHAR_SIZE + 1);
+			self->data.rmc = (char *) realloc(self->data.rmc, sentence_length*CHAR_SIZE + 1);
 
 			if (self->data.rmc == NULL){
 				// Error: out of memory
@@ -186,8 +246,8 @@ static void update_data(neo_m8_obj_t *self){
 				mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
 			}
 
-			strncpy(self->data.rmc, data_section, str_length);
-			self->data.rmc[str_length] = '\0';
+			strncpy(self->data.rmc, data_section, sentence_length);
+			self->data.rmc[sentence_length] = '\0';
 		}
 
 		sentences_read++;
@@ -253,77 +313,6 @@ static void extract_lat_long(char* nmea_section, float* output){
 	*output = (degrees + minutes/60);
 }
 
-static void update_buffer_internal(neo_m8_obj_t *self){
-	/**
-	 * Internal C function that updates the 512-byte NMEA data buffer
-	 * Functions as a sliding window buffer - only holds the most recent 512 bytes of data
-	*/
-	mp_buffer_info_t buf_info;
-	mp_obj_t any_method[2], read_method[2];
-	uint16_t copy_start, new_bytes_copy_start = 0;
-	nlr_buf_t cpu_state;
-
-	// Loading required methods
-	mp_load_method(self->uart_bus, MP_QSTR_any, any_method);
-	mp_load_method(self->uart_bus, MP_QSTR_read, read_method);
-
-	if (nlr_push(&cpu_state) == 0){
-		// Checking if there's any data available
-		if (mp_obj_get_int(mp_call_method_n_kw(0, 0, any_method)) == 0){
-			nlr_pop();
-			return;
-		}
-
-		// Getting new UART data and then buffer info from it
-		mp_obj_t bytes = mp_call_method_n_kw(0, 0, read_method);
-		mp_get_buffer_raise(bytes, &buf_info, MP_BUFFER_READ);
-
-		nlr_pop();
-	}
-	else {
-		mp_raise_msg(&mp_type_OSError, MP_ERROR_TEXT("UART method failed"));
-	}
-
-	// Finding total number of bytes held
-	uint16_t buffer_total = self->buffer_len + buf_info.len;
-
-	// If there's too many bytes to fill the buffer, then slide the window
-	if (buffer_total > 512){
-		// Finding the point where the most recent 512 bytes starts
-		copy_start = buffer_total - 512;
-
-		// If the most recent 512 bytes starts before the current buffer ends, then copy from old buffer into new one
-		if (copy_start < self->buffer_len){
-			uint16_t old_bytes_copy = self->buffer_len - copy_start;
-
-			// Copying the required bytes from the current buffer into the new buffer
-			memmove(self->buffer, self->buffer + copy_start, old_bytes_copy);
-
-			// Updating the buffer length
-			self->buffer_len = old_bytes_copy;
-		}
-		// If the most recent 512 bytes is after the current buffer window, then discard all buffer data
-		else {
-			new_bytes_copy_start = buf_info.len - 512;
-			self->buffer_len = 0;
-		}
-	}
-
-	// Working out the number of new bytes to copy
-	uint16_t new_bytes_copy = buf_info.len - new_bytes_copy_start;
-
-	// Copying bytes from the new data into the buffer
-	memcpy(self->buffer + self->buffer_len, buf_info.buf + new_bytes_copy_start, new_bytes_copy);
-
-	// Updating buffer length
-	self->buffer_len += new_bytes_copy;
-
-	// Ensuring termination character added
-	self->buffer[self->buffer_len] = '\0';
-
-	return;
-}
-
 static int8_t ubx_ack_nack(neo_m8_obj_t *self){
 	uint32_t start_time = mp_hal_ticks_ms();
 	uint16_t i;
@@ -331,23 +320,24 @@ static int8_t ubx_ack_nack(neo_m8_obj_t *self){
 	// This function times out after 1s of looking for an ACK/NACK
 	while (mp_hal_ticks_ms() - start_time < 1000){
 		mp_hal_delay_ms(10);
-		update_buffer_internal(self);
+
+		update_buffer_internal(self->uart_number, &self->buffer_length, self->buffer);
 
 		// Making sure no buffer underflow is possible
-		if (self->buffer_len < 4){
+		if (self->buffer_length < 4){
 			continue;
 		}
 
 		// Searching for ACKs/NACKs
-		for (i = 0; i < self->buffer_len-3; i++){
-			if (((uint8_t)self->buffer[i] == 0xB5) && ((uint8_t)self->buffer[i+1] == 0x62) && ((uint8_t)self->buffer[i+2] == 0x05)){
+		for (i = 0; i < self->buffer_length-3; i++){
+			if ((self->buffer[i] == 0xB5) && (self->buffer[i+1] == 0x62) && (self->buffer[i+2] == 0x05)){
 
 				// NACK
-				if ((uint8_t)self->buffer[i+3] == 0x00){
+				if (self->buffer[i+3] == 0x00){
 					return 0;
 				}
 				// ACK
-				else if ((uint8_t)self->buffer[i+3] == 0x01){
+				else if (self->buffer[i+3] == 0x01){
 					return 1;
 				}
 			}
@@ -360,11 +350,11 @@ static int8_t ubx_ack_nack(neo_m8_obj_t *self){
 
 mp_obj_t update_buffer(mp_obj_t self_in){
 	/**
-	 * Micropython-exposed function to call the internal C buffer update method
+	 * Exposing the update_buffer_internal function to micropython
 	*/
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
-	update_buffer_internal(self);
+	update_buffer_internal(self->uart_number, &self->buffer_length, self->buffer);
 
 	return mp_const_none;
 }
@@ -634,6 +624,51 @@ mp_obj_t getdata(mp_obj_t self_in){
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_getdata_obj, getdata);
 
+mp_obj_t timestamp(mp_obj_t self_in){
+	/**
+	 * Function to return GPS time/date stamp
+	 * Formatted as "{YYYY-MM-DD}T{hh:mm:ss}Z"
+	*/
+	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
+
+	uint8_t i;
+	char *rmc_split[13], *token;
+	char time[9], timestamp[20] = "2000-01-01T00:00:00Z";
+
+	update_data(self);
+
+	// Splitting the RMC sentence up into sections, which can then be processed
+	token = strtok(self->data.rmc, ",");
+	for (i = 0; token != NULL; i++){
+		rmc_split[i] = token;
+
+		token = strtok(NULL, ",");
+	}
+
+	if ((i < 8) || (strcmp(rmc_split[2], "A") != 0)){
+		return mp_obj_new_str(timestamp, 20);
+	}
+
+	// Formatting the date data
+	timestamp[8] = rmc_split[i-2][0];
+	timestamp[9] = rmc_split[i-2][1];
+	timestamp[5] = rmc_split[i-2][2];
+	timestamp[6] = rmc_split[i-2][3];
+	timestamp[2] = rmc_split[i-2][4];
+	timestamp[3] = rmc_split[i-2][5];
+
+	// Formatting the time data
+	timestamp[11] = rmc_split[1][0];
+	timestamp[12] = rmc_split[1][1];
+	timestamp[14] = rmc_split[1][2];
+	timestamp[15] = rmc_split[1][3];
+	timestamp[17] = rmc_split[1][4];
+	timestamp[18] = rmc_split[1][5];
+
+	return mp_obj_new_str(timestamp, 20);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_timestamp_obj, timestamp);
+
 mp_obj_t gnss_stop(mp_obj_t self_in){
 	/**
 	 * Function to softly shut down the NEO-M8's GNSS systems
@@ -641,22 +676,21 @@ mp_obj_t gnss_stop(mp_obj_t self_in){
 	 * Returns 1 if an ACK was received, 0 if a NACK was received, and -1 if nothing received
 	*/
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
-	mp_obj_t write_method[2];
 	nlr_buf_t cpu_state;
-	int8_t flag;
+	int8_t flag, bytes_written;
 
 	if (nlr_push(&cpu_state) == 0){
-		// Loads the UART write method
-		mp_load_method(self->uart_bus, MP_QSTR_write, write_method);
-
 		// Defining the UBX-CFG-RST packet to send
 		// Doesn't need to be in error catching, but needs write_method to be defined
-		mp_obj_t packet[3] = {write_method[0], write_method[1],
-			mp_obj_new_bytes((const byte[12]){0xB5, 0x62, 0x06, 0x04, 0x04, 0x00, 0x00, 0x00, 0x08, 0x00, 0x16, 0x74}, 12)};
+		uint8_t packet[12] = {0xB5, 0x62, 0x06, 0x04, 0x04, 0x00, 0x00, 0x00, 0x08, 0x00, 0x16, 0x74};
 
 		// Sending the UBX packet
-		mp_call_method_n_kw(1, 0, packet);
+		bytes_written = uart_write_bytes(self->uart_number, packet, 12);
 		flag = ubx_ack_nack(self);
+
+		if (bytes_written != 12){
+			mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("UART write failed"));
+		}
 
 		nlr_pop();
 	}
@@ -675,22 +709,21 @@ mp_obj_t gnss_start(mp_obj_t self_in){
 	 * Returns 1 if an ACK was received, 0 if a NACK was received, and -1 if nothing received
 	*/
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
-	mp_obj_t write_method[2];
 	nlr_buf_t cpu_state;
-	int8_t flag;
+	int8_t flag, bytes_written;
 
 	if (nlr_push(&cpu_state) == 0){
-		// Loads the UART write method
-		mp_load_method(self->uart_bus, MP_QSTR_write, write_method);
-
 		// Defining the UBX-CFG-RST packet to send
 		// Doesn't need to be in error catching, but needs write_method to be defined
-		mp_obj_t packet[3] = {write_method[0], write_method[1],
-	    	mp_obj_new_bytes((const byte[12]){0xB5, 0x62, 0x06, 0x04, 0x04, 0x00, 0x00, 0x00, 0x09, 0x00, 0x17, 0x76}, 12)};
+		uint8_t packet[12] = {0xB5, 0x62, 0x06, 0x04, 0x04, 0x00, 0x00, 0x00, 0x09, 0x00, 0x17, 0x76};
 
 		// Sending the UBX packet
-		mp_call_method_n_kw(1, 0, packet);
+		bytes_written = uart_write_bytes(self->uart_number, packet, 12);
 		flag = ubx_ack_nack(self);
+
+		if (bytes_written != 12){
+			mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("UART write failed"));
+		}
 
 		nlr_pop();
 	}
@@ -709,8 +742,8 @@ mp_obj_t setrate(mp_obj_t self_in, mp_obj_t rate, mp_obj_t measurements_per_nav_
 	*/
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 	nlr_buf_t cpu_state;
-	mp_obj_t write_method[2];
 	int8_t flag;
+	uint8_t bytes_written, i, ck_a = 0, ck_b = 0;
 
 	float mp_rate = mp_obj_get_float(rate);
 	if ((mp_rate < 0) || (mp_rate > 10)){
@@ -718,12 +751,8 @@ mp_obj_t setrate(mp_obj_t self_in, mp_obj_t rate, mp_obj_t measurements_per_nav_
 	}
 
 	uint8_t ms_rate = (uint8_t)(1000/mp_rate), measurements_nav_sol = mp_obj_get_uint(measurements_per_nav_sol);
-	uint8_t i, ck_a = 0, ck_b = 0;
 
 	if (nlr_push(&cpu_state) == 0){
-		// Loading UART write method
-		mp_load_method(self->uart_bus, MP_QSTR_write, write_method);
-
 		uint8_t bytes_packet[8] = {0x06, 0x08, 0x06, 0x00, ms_rate, measurements_nav_sol, 0x00, 0x00};
 
 		// Calculating the UBX checksum
@@ -735,12 +764,15 @@ mp_obj_t setrate(mp_obj_t self_in, mp_obj_t rate, mp_obj_t measurements_per_nav_
 		ck_b &= 0xFF;
 
 		// Putting together the final data packet
-		mp_obj_t packet[3] = {write_method[0], write_method[1],
-			mp_obj_new_bytes((const byte[12]){0xB5, 0x62, 0x06, 0x08, 0x06, 0x00, ms_rate, measurements_nav_sol, 0x00, 0x00, ck_a, ck_b}, 12)};
+		uint8_t packet[12] = {0xB5, 0x62, 0x06, 0x08, 0x06, 0x00, ms_rate, measurements_nav_sol, 0x00, 0x00, ck_a, ck_b};
 
 		// Writing the packet to the UART
-		mp_call_method_n_kw(1, 0, packet);
+		bytes_written = uart_write_bytes(self->uart_number, packet, 12);
 		flag = ubx_ack_nack(self);
+
+		if (bytes_written != 12){
+			mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("UART write failed"));
+		}
 
 		nlr_pop();
 	}
@@ -758,21 +790,20 @@ mp_obj_t modulesetup(mp_obj_t self_in){
 	 * Returns 1 if an ACK was received, 0 if a NACK was received, and -1 if nothing received
 	*/
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
-	mp_obj_t write_method[2];
 	nlr_buf_t cpu_state;
-	int8_t flag;
+	int8_t flag, bytes_written;
 
 	if (nlr_push(&cpu_state) == 0){
-		// Loading UART write method
-		mp_load_method(self->uart_bus, MP_QSTR_write, write_method);
-
 		// UBX-CFG-MSG: Disabling VTG NMEA sentence as it is redundant
 		// Putting together the data packet
-		mp_obj_t packet[3] = {write_method[0], write_method[1],
-			mp_obj_new_bytes((const byte[11]){0xB5, 0x62, 0x06, 0x01, 0x03, 0x00, 0xF0, 0x05, 0x00, 0xFF, 0x19}, 11)};
+		uint8_t packet[11] = {0xB5, 0x62, 0x06, 0x01, 0x03, 0x00, 0xF0, 0x05, 0x00, 0xFF, 0x19};
 
 		// Writing the packet to the UART
-		mp_call_method_n_kw(1, 0, packet);
+		bytes_written = uart_write_bytes(self->uart_number, packet, 11);
+
+		if (bytes_written != 11){
+			mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("UART write failed"));
+		}
 
 		// Checking for ACK/NACK, returning if no ACK found
 		flag = ubx_ack_nack(self);
@@ -785,10 +816,14 @@ mp_obj_t modulesetup(mp_obj_t self_in){
 		// UBX-CFG-NAV5: Configures module to airborne with <4g acceleration, 3D fix only,
 		// satellites 15 degrees above horizon to be used for a fix, static hold at <20cm/s and 1m, automatic UTC standard
 		// Putting together data packet
-		packet[2] = mp_obj_new_bytes((const byte[44]){0xB5, 0x62, 0x06, 0x24, 0x24, 0x00, 0x47, 0x08, 0x08, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xD0, 0x2B}, 44);
+		uint8_t packet2[44] = {0xB5, 0x62, 0x06, 0x24, 0x24, 0x00, 0x47, 0x08, 0x08, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xD0, 0x2B};
 
 		// Writing the packet to the UART
-		mp_call_method_n_kw(1, 0, packet);
+		bytes_written = uart_write_bytes(self->uart_number, packet2, 44);
+
+		if (bytes_written != 44){
+			mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("UART write failed"));
+		}
 
 		// Checking for ACK/NACK, returning if no ACK found
 		flag = ubx_ack_nack(self);
@@ -801,11 +836,14 @@ mp_obj_t modulesetup(mp_obj_t self_in){
 		// UBX-CFG-NAVX5: Configures module to min. satellites for navigation=4, max. satellites for navigation=50,
 		// initial fix must be 3D, AssistNow Autonomous turned on, maximum AssistNow Autonomous orbit error=20m
 		// Putting together data packet
-		packet[2] = mp_obj_new_bytes((const byte[48]){0xB5, 0x62, 0x06, 0x23, 0x28, 0x00, 0x00, 0x00, 0x44, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x3C, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2B, 0x19}, 48);
+		uint8_t packet3[48] = {0xB5, 0x62, 0x06, 0x23, 0x28, 0x00, 0x00, 0x00, 0x44, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x3C, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2B, 0x19};
 
 		// Writing the packet to the UART
-		mp_call_method_n_kw(1, 0, packet);
+		bytes_written = uart_write_bytes(self->uart_number, packet3, 48);
 
+		if (bytes_written != 48){
+			mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("UART write failed"));
+		}
 		// Checking for ACK/NACK, returning if no ACK found
 		flag = ubx_ack_nack(self);
 
@@ -816,10 +854,14 @@ mp_obj_t modulesetup(mp_obj_t self_in){
 
 		// UBX-CFG-GNSS: Configures module to enable Galileo, GPS, GLONASS, BeiDou, SBAS
 		// Putting together data packet
-		packet[2] = mp_obj_new_bytes((const byte[52]){0xB5, 0x62, 0x06, 0x3E, 0x2C, 0x00, 0x00, 0x00, 0xFF, 0x05, 0x00, 0x08, 0x10, 0x00, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x03, 0x00, 0x00, 0x01, 0x00, 0x01, 0x02, 0x02, 0x08, 0x00, 0x00, 0x01, 0x00, 0x01, 0x03, 0x08, 0x0E, 0x00, 0x00, 0x01, 0x00, 0x01, 0x06, 0x06, 0x0e, 0x00, 0x00, 0x01, 0x00, 0x01, 0xDA, 0x1A}, 52);
+		uint8_t packet4[52] = {0xB5, 0x62, 0x06, 0x3E, 0x2C, 0x00, 0x00, 0x00, 0xFF, 0x05, 0x00, 0x08, 0x10, 0x00, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x03, 0x00, 0x00, 0x01, 0x00, 0x01, 0x02, 0x02, 0x08, 0x00, 0x00, 0x01, 0x00, 0x01, 0x03, 0x08, 0x0E, 0x00, 0x00, 0x01, 0x00, 0x01, 0x06, 0x06, 0x0e, 0x00, 0x00, 0x01, 0x00, 0x01, 0xDA, 0x1A};
 
 		// Writing the packet to the UART
-		mp_call_method_n_kw(1, 0, packet);
+		bytes_written = uart_write_bytes(self->uart_number, packet4, 52);
+
+		if (bytes_written != 52){
+			mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("UART write failed"));
+		}
 
 		// Checking for ACK/NACK, returning if no ACK found
 		flag = ubx_ack_nack(self);
@@ -831,11 +873,14 @@ mp_obj_t modulesetup(mp_obj_t self_in){
 
 		// UBX-CFG-ITFM: Configures module to enable interference detection, broadband threshold=7dB, continuous wave threshold=20dB, active antenna
 		// Putting together data packet
-		packet[2] = mp_obj_new_bytes((const byte[16]){0xB5, 0x62, 0x06, 0x39, 0x08, 0x00, 0xAD, 0x62, 0xAD, 0x47, 0x00, 0x00, 0x23, 0x1E, 0x8B, 0xF6}, 16);
+		uint8_t packet5[16] = {0xB5, 0x62, 0x06, 0x39, 0x08, 0x00, 0xAD, 0x62, 0xAD, 0x47, 0x00, 0x00, 0x23, 0x1E, 0x8B, 0xF6};
 
 		// Writing the packet to the UART
-		mp_call_method_n_kw(1, 0, packet);
+		bytes_written = uart_write_bytes(self->uart_number, packet5, 16);
 
+		if (bytes_written != 16){
+			mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("UART write failed"));
+		}
 		// Checking for ACK/NACK, returning if no ACK found
 		flag = ubx_ack_nack(self);
 
@@ -848,10 +893,14 @@ mp_obj_t modulesetup(mp_obj_t self_in){
 		// This should be changed to saving into battery-backed RAM for NEO-M8Q and NEO-M8M which don't have programmable flash
         // Do this by changing the byte b'\x02' below for the byte b'\x01' (assuming you have BBR, unless you want to save it into the SPI Flash)
 		// Putting together data packet
-		packet[2] = mp_obj_new_bytes((const byte[21]){0xB5, 0x62, 0x06, 0x09, 0x0D, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1A, 0x00, 0x00, 0x00, 0x00, 0x02, 0x38, 0x57}, 21);
+		uint8_t packet6[21] = {0xB5, 0x62, 0x06, 0x09, 0x0D, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1A, 0x00, 0x00, 0x00, 0x00, 0x02, 0x38, 0x57};
 
 		// Writing the packet to the UART
-		mp_call_method_n_kw(1, 0, packet);
+		bytes_written = uart_write_bytes(self->uart_number, packet6, 21);
+
+		if (bytes_written != 21){
+			mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("UART write failed"));
+		}
 
 		// Checking for ACK/NACK, returning if no ACK found
 		flag = ubx_ack_nack(self);
@@ -863,10 +912,14 @@ mp_obj_t modulesetup(mp_obj_t self_in){
 
 		// UBX-CFG-RST: Completely hardware resets the module
 		// Putting together data packet
-		packet[2] = mp_obj_new_bytes((const byte[12]){0xB5, 0x62, 0x06, 0x04, 0x04, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x0C, 0x5D}, 12);
+		uint8_t packet7[12] = {0xB5, 0x62, 0x06, 0x04, 0x04, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x0C, 0x5D};
 
 		// Writing the packet to the UART
-		mp_call_method_n_kw(1, 0, packet);
+		bytes_written = uart_write_bytes(self->uart_number, packet7, 12);
+
+		if (bytes_written != 12){
+			mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("UART write failed"));
+		}
 
 		// Checking for ACK/NACK, returning if no ACK found
 		flag = ubx_ack_nack(self);
@@ -894,11 +947,12 @@ static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_modulesetup_obj, modulesetup);
 
 // Defining the functions that are exposed to micropython
 static const mp_rom_map_elem_t neo_m8_locals_dict_table[] = {
-	{MP_ROM_QSTR(MP_QSTR_update_buffer), MP_ROM_PTR(&neo_m8_update_buffer_obj)},
 	{MP_ROM_QSTR(MP_QSTR_position), MP_ROM_PTR(&neo_m8_position_obj)},
 	{MP_ROM_QSTR(MP_QSTR_velocity), MP_ROM_PTR(&neo_m8_velocity_obj)},
 	{MP_ROM_QSTR(MP_QSTR_altitude), MP_ROM_PTR(&neo_m8_altitude_obj)},
+	{MP_ROM_QSTR(MP_QSTR_timestamp), MP_ROM_PTR(&neo_m8_timestamp_obj)},
 	{MP_ROM_QSTR(MP_QSTR_getdata), MP_ROM_PTR(&neo_m8_getdata_obj)},
+	{MP_ROM_QSTR(MP_QSTR_update_buffer), MP_ROM_PTR(&neo_m8_update_buffer_obj)},
 	{MP_ROM_QSTR(MP_QSTR_gnss_start), MP_ROM_PTR(&neo_m8_gnss_start_obj)},
 	{MP_ROM_QSTR(MP_QSTR_gnss_stop), MP_ROM_PTR(&neo_m8_gnss_stop_obj)},
 	{MP_ROM_QSTR(MP_QSTR_setrate), MP_ROM_PTR(&neo_m8_setrate_obj)},
