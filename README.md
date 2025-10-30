@@ -4,19 +4,19 @@
 
 This code reads data off of a UART pin on the ESP32. The Neo-M8 modules outputs NMEA sentences, which this code then converts into the useful data needed.
 
-This code contains a modulesetup() method to configure the GPS module - this only needs to be run once per module, settings are saved into programmable flash (this will need to be change to Battery-Backed RAM for the NEO-M8M/M8Q).
+This code contains a modulesetup() method to configure the GPS module - settings are saved into programmable flash (this will need to be change to Battery-Backed RAM for the NEO-M8M/M8Q, see the code for more details).
 
 As standard, the module updates its navigation fixes at a rate of 1Hz. This can be changed by calling the setrate() method, which takes two arguments: the first is the navigation solution update rate, while the second is the number of measurements per navigation solution. You can also call gnss_stop() and gnss_start() to stop/start the module's GNSS systems. gnss_stop() should be called before pulling the module's power, and these commands can also be used to reduce the module's power consumption when necessary. These methods may have different effects depending on the firmware version of your module.
 
 All the methods that configure GPS module settings return a 1 if an ACK was received from the module, 0 if a NACK was received, and -1 if nothing was received.
 
-To read data, you can call position(), velocity() or altitude() - which returns the relevant data, along with a timestamp. You can also call getdata(), which returns all the data returned individually by those methods.
+To read data, you can call position(), velocity() or altitude() - which returns the relevant data, along with a timestamp. You can also call getdata(), which returns all the data.
 
-To get faster GPS data reads, periodically call the update_buffer() method (takes very little time, call it without calling the main data processing methods). This simply loads data from the ESP32's UART RX buffer (defined as 128 bytes long, in this driver) into the driver's 512-byte sliding-window buffer of GPS data. This can reduce GPS data reads down to 0.002 seconds/read in my experiece, compared to 0.5-0.8 seconds/read when not calling the update_buffer() method regularly.
+To get faster GPS data reads, periodically call the update_buffer() method (takes very little time, call it without calling the main data processing methods). This simply loads data from the ESP32's UART RX buffer into the driver's 512-byte sliding-window buffer. This can reduce GPS data read speeds significantly in some use cases.
 
 All position/altitude errors are returned to a 1σ confidence level (code assumes 1.5m HDOP and 5m VDOP).
 
-If there are any issues with the data (i.e. the code can't process it), integer zeros will be returned for those values.
+If there are any issues with the data (i.e. the code can't process it), zeros will be returned for those values.
 
 ### Example Usage: ###
 
@@ -41,12 +41,13 @@ For higher performance, in the embedded_c_module folder you will find the .c, .h
 
 Example usage:
 ```python3
-from machine import UART
 import NEO_M8
 
-# NOTE: This embedded module requires the UART bus to be passed in - not TX/RX pin numers
-bus = UART(2, baudrate=9600, tx=tx_pin, rx=rx_pin)
-gps = neo_m8.NEO_M8(bus)
+uart_no = 2 # Has to be 1 or 2 - UART0 is reserved for REPL/other uses
+tx_pin = 19
+rx_pin = 20
+
+gps = neo_m8.NEO_M8(tx_pin, rx_pin, uart_no)
 
 gps.modulesetup()
 gps.setrate(2, 3)
@@ -55,6 +56,7 @@ print(gps.position())
 print(gps.altitude())
 print(gps.velocity())
 print(gps.getdata())
+print(gps.timestamp()) # Extra function in the C module - returns time/date stamp as {yyyy-mm-dd}T{hh:mm:ss}Z
 ```
 
 ### Compiling the module into firmware: ###
