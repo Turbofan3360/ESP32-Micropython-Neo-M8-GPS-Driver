@@ -624,6 +624,51 @@ mp_obj_t getdata(mp_obj_t self_in){
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_getdata_obj, getdata);
 
+mp_obj_t timestamp(mp_obj_t self_in){
+	/**
+	 * Function to return GPS time/date stamp
+	 * Formatted as "{YYYY-MM-DD}T{hh:mm:ss}Z"
+	*/
+	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
+
+	uint8_t i;
+	char *rmc_split[13], *token;
+	char time[9], timestamp[20] = "2000-01-01T00:00:00Z";
+
+	update_data(self);
+
+	// Splitting the RMC sentence up into sections, which can then be processed
+	token = strtok(self->data.rmc, ",");
+	for (i = 0; token != NULL; i++){
+		rmc_split[i] = token;
+
+		token = strtok(NULL, ",");
+	}
+
+	if ((i < 8) || (strcmp(rmc_split[2], "A") != 0)){
+		return mp_obj_new_str(timestamp, 20);
+	}
+
+	// Formatting the date data
+	timestamp[8] = rmc_split[i-2][0];
+	timestamp[9] = rmc_split[i-2][1];
+	timestamp[5] = rmc_split[i-2][2];
+	timestamp[6] = rmc_split[i-2][3];
+	timestamp[2] = rmc_split[i-2][4];
+	timestamp[3] = rmc_split[i-2][5];
+
+	// Formatting the time data
+	timestamp[11] = rmc_split[1][0];
+	timestamp[12] = rmc_split[1][1];
+	timestamp[14] = rmc_split[1][2];
+	timestamp[15] = rmc_split[1][3];
+	timestamp[17] = rmc_split[1][4];
+	timestamp[18] = rmc_split[1][5];
+
+	return mp_obj_new_str(timestamp, 20);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_timestamp_obj, timestamp);
+
 mp_obj_t gnss_stop(mp_obj_t self_in){
 	/**
 	 * Function to softly shut down the NEO-M8's GNSS systems
@@ -905,6 +950,7 @@ static const mp_rom_map_elem_t neo_m8_locals_dict_table[] = {
 	{MP_ROM_QSTR(MP_QSTR_position), MP_ROM_PTR(&neo_m8_position_obj)},
 	{MP_ROM_QSTR(MP_QSTR_velocity), MP_ROM_PTR(&neo_m8_velocity_obj)},
 	{MP_ROM_QSTR(MP_QSTR_altitude), MP_ROM_PTR(&neo_m8_altitude_obj)},
+	{MP_ROM_QSTR(MP_QSTR_timestamp), MP_ROM_PTR(&neo_m8_timestamp_obj)},
 	{MP_ROM_QSTR(MP_QSTR_getdata), MP_ROM_PTR(&neo_m8_getdata_obj)},
 	{MP_ROM_QSTR(MP_QSTR_update_buffer), MP_ROM_PTR(&neo_m8_update_buffer_obj)},
 	{MP_ROM_QSTR(MP_QSTR_gnss_start), MP_ROM_PTR(&neo_m8_gnss_start_obj)},
