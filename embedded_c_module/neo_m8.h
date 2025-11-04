@@ -9,12 +9,10 @@
 #include "py/obj.h"
 #include "py/objstr.h"
 #include "py/mphal.h"
-#include "py/nlr.h"
 
 #include "driver/uart.h"
 
 // Constant definitions
-#define CHAR_SIZE sizeof(char)
 #define CHAR_PTR_SIZE sizeof(char*)
 #define FLOAT_SIZE sizeof(float)
 #define INTERNAL_BUFFER_LENGTH 512
