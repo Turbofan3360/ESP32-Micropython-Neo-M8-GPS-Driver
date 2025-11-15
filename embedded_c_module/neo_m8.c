@@ -386,13 +386,18 @@ mp_obj_t position(mp_obj_t self_in){
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
 	uint8_t i;
-	char *gga_split[9], timestamp[9];
+	char *gga_split[9], timestamp[9], gga_copy[83];
 	float latitude, longitude, pos_error;
 
 	update_data(self);
 
+	// Creating a copy of the GGA sentence as strtok is destructive
+	// Uses fixed length of 83 bytes, the maximum sentence length in NMEA 0183 Version 4.10
+	strncpy(gga_copy, self->data.gga, 82);
+	gga_copy[82] = '\0';
+
 	// Splitting the GLL sentence up into sections, which can then be processed
-	char *token = strtok(self->data.gga, ",");
+	char *token = strtok(gga_copy, ",");
 	for (i = 0; token != NULL; i++){
 		gga_split[i] = token;
 
@@ -437,13 +442,18 @@ mp_obj_t velocity(mp_obj_t self_in){
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
 	uint8_t i;
-	char *rmc_split[13], timestamp[9];
+	char *rmc_split[13], timestamp[9], rmc_copy[83];
 	float sog, cog;
 
 	update_data(self);
 
+	// Creating a copy of the RMC sentence as strtok is destructive
+	// Uses fixed length of 83 bytes, the maximum sentence length in NMEA 0183 Version 4.10
+	strncpy(rmc_copy, self->data.rmc, 82);
+	rmc_copy[82] = '\0';
+
 	// Splitting the RMC sentence up into sections, which can then be processed
-	char *token = strtok(self->data.rmc, ",");
+	char *token = strtok(rmc_copy, ",");
 	for (i = 0; token != NULL; i++){
 		rmc_split[i] = token;
 
@@ -481,13 +491,21 @@ mp_obj_t altitude(mp_obj_t self_in){
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
 	uint8_t i;
-	char *gga_split[15], timestamp[9], **gsa_split = NULL;
+	char *gga_split[15], timestamp[9], gga_copy[83], gsa_copy[83], **gsa_split = NULL;
 	float altitude, geosep, verterror;
 
 	update_data(self);
 
+	// Creating a copy of the GGA/GSA sentences as strtok is destructive
+	// Uses fixed length of 83 bytes, the maximum sentence length in NMEA 0183 Version 4.10
+	strncpy(gga_copy, self->data.gga, 82);
+	gga_copy[82] = '\0';
+
+	strncpy(gsa_copy, self->data.gsa, 82);
+	gsa_copy[82] = '\0';
+
 	// Splitting the GGA sentence up into sections, which can then be processed
-	char *token = strtok(self->data.gga, ",");
+	char *token = strtok(gga_copy, ",");
 	for (i = 0; token != NULL; i++){
 		gga_split[i] = token;
 
@@ -508,7 +526,7 @@ mp_obj_t altitude(mp_obj_t self_in){
 	geosep = atof(gga_split[11]);
 
 	// Extracting vertical error
-	token = strtok(self->data.gsa, ",");
+	token = strtok(gsa_copy, ",");
 	for (i = 0; token != NULL; i++){
 		// Re-allocating extended memory - the length of the GSA sentence is unknown
 		gsa_split = (char **) realloc(gsa_split, (i+1)*CHAR_PTR_SIZE);
@@ -543,13 +561,24 @@ mp_obj_t getdata(mp_obj_t self_in){
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
 	uint8_t i, j;
-	char *gga_split[15], *rmc_split[13], timestamp[9], **gsa_split = NULL;
+	char *gga_split[15], *rmc_split[13], gga_copy[83], rmc_copy[83], gsa_copy[83], timestamp[9], **gsa_split = NULL;
 	float latitude, longitude, pos_error, altitude, geo_sep, verterror, sog, cog;
 
 	update_data(self);
 
+	// Creating a copy of the GGA/GSA/RMC sentences as strtok is destructive
+	// Uses fixed length of 83 bytes, the maximum sentence length in NMEA 0183 Version 4.10
+	strncpy(gga_copy, self->data.gga, 82);
+	gga_copy[82] = '\0';
+
+	strncpy(gsa_copy, self->data.gsa, 82);
+	gsa_copy[82] = '\0';
+
+	strncpy(rmc_copy, self->data.rmc, 82);
+	rmc_copy[82] = '\0';
+
 	// Splitting the GGA sentence up into sections, which can then be processed
-	char *token = strtok(self->data.gga, ",");
+	char *token = strtok(gga_copy, ",");
 	for (i = 0; token != NULL; i++){
 		gga_split[i] = token;
 
@@ -557,7 +586,7 @@ mp_obj_t getdata(mp_obj_t self_in){
 	}
 
 	// Splitting the RMC sentence up into sections, which can then be processed
-	token = strtok(self->data.rmc, ",");
+	token = strtok(rmc_copy, ",");
 	for (j = 0; token != NULL; j++){
 		rmc_split[j] = token;
 
@@ -599,7 +628,7 @@ mp_obj_t getdata(mp_obj_t self_in){
 	geo_sep = atof(gga_split[11]);
 
 	// Extracting vertical error
-	token = strtok(self->data.gsa, ",");
+	token = strtok(gsa_copy, ",");
 	for (i = 0; token != NULL; i++){
 		// Re-allocating extended memory - the length of the GSA sentence is unknown
 		gsa_split = (char **) realloc(gsa_split, (i+1)*CHAR_PTR_SIZE);
@@ -649,13 +678,18 @@ mp_obj_t timestamp(mp_obj_t self_in){
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
 	uint8_t i;
-	char *rmc_split[13], *token;
+	char *rmc_split[13], rmc_copy[83], *token;
 	char timestamp[20] = "2000-01-01T00:00:00Z";
 
 	update_data(self);
 
+	// Creating a copy of the RMC sentences as strtok is destructive
+	// Uses fixed length of 83 bytes, the maximum sentence length in NMEA 0183 Version 4.10
+	strncpy(rmc_copy, self->data.rmc, 82);
+	rmc_copy[82] = '\0';
+
 	// Splitting the RMC sentence up into sections, which can then be processed
-	token = strtok(self->data.rmc, ",");
+	token = strtok(rmc_copy, ",");
 	for (i = 0; token != NULL; i++){
 		rmc_split[i] = token;
 
