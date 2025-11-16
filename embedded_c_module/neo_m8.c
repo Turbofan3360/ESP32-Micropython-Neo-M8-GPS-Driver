@@ -84,6 +84,8 @@ mp_obj_t neo_m8_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, 
 	self->data.gga = NULL;
 	self->data.rmc = NULL;
 
+	mp_hal_delay_ms(100);
+
 	return MP_OBJ_FROM_PTR(self);
 }
 
@@ -391,6 +393,11 @@ mp_obj_t position(mp_obj_t self_in){
 
 	update_data(self);
 
+	// Checking for null pointers
+	if (self->data.gga == NULL){
+		return mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
+	}
+
 	// Creating a copy of the GGA sentence as strtok is destructive
 	// Uses fixed length of 83 bytes, the maximum sentence length in NMEA 0183 Version 4.10
 	strncpy(gga_copy, self->data.gga, 82);
@@ -447,6 +454,11 @@ mp_obj_t velocity(mp_obj_t self_in){
 
 	update_data(self);
 
+	// Checking for null pointers
+	if (self->data.rmc == NULL){
+		return mp_obj_new_list(3, (mp_obj_t[3]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
+	}
+
 	// Creating a copy of the RMC sentence as strtok is destructive
 	// Uses fixed length of 83 bytes, the maximum sentence length in NMEA 0183 Version 4.10
 	strncpy(rmc_copy, self->data.rmc, 82);
@@ -495,6 +507,10 @@ mp_obj_t altitude(mp_obj_t self_in){
 	float altitude, geosep, verterror;
 
 	update_data(self);
+
+	if ((self->data.gga == NULL) || (self->data.gsa == NULL)){
+		return mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
+	}
 
 	// Creating a copy of the GGA/GSA sentences as strtok is destructive
 	// Uses fixed length of 83 bytes, the maximum sentence length in NMEA 0183 Version 4.10
@@ -565,6 +581,15 @@ mp_obj_t getdata(mp_obj_t self_in){
 	float latitude, longitude, pos_error, altitude, geo_sep, verterror, sog, cog;
 
 	update_data(self);
+
+	// Checking for null pointers
+	if ((self->data.gga == NULL) || (self->data.gsa == NULL) || (self->data.rmc == NULL)){
+		return mp_obj_new_list(9, (mp_obj_t[9]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
+												mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
+												mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
+												mp_const_none, mp_obj_new_float(0.0f),
+												mp_obj_new_str("0", 1)});
+	}
 
 	// Creating a copy of the GGA/GSA/RMC sentences as strtok is destructive
 	// Uses fixed length of 83 bytes, the maximum sentence length in NMEA 0183 Version 4.10
