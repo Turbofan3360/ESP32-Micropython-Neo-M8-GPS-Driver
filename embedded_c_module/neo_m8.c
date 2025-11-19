@@ -21,8 +21,8 @@ mp_obj_t neo_m8_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, 
 	if ((uart_id != 1) && (uart_id != 2)){
 		mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("UART ID can only be 1 or 2"));
 	}
-	if ((uart_tx_pin > 45) || (uart_rx_pin > 45)){
-		mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Only 45 pins on ESP32-S3: Please enter valid pin number"));
+	if (!GPIO_IS_VALID_GPIO(uart_rx_pin) || !GPIO_IS_VALID_OUTPUT_GPIO(uart_tx_pin)){
+		mp_raise_msg(&mp_type_ValueError, MP_ERROR_TEXT("Invalid UART pin numbers"));
 	}
 
 	if (uart_id == 1){
