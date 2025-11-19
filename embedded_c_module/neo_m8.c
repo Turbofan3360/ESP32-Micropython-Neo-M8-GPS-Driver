@@ -6,7 +6,8 @@ mp_obj_t neo_m8_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, 
 	 * Also initializes the micropython object which is passed back
 	*/
 	uart_port_t uart_num;
-	uint8_t uart_tx_pin, uart_rx_pin, uart_id;
+	gpio_num_t uart_tx_pin, uart_rx_pin;
+	uint8_t uart_id;
 	esp_err_t err;
 
 	// Checking arguments
