@@ -37,10 +37,10 @@ mp_obj_t neo_m8_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, 
     	err = uart_driver_delete(uart_num);
 
 		if (err != ESP_OK) {
-    		mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("UART driver cleanup failed: %d"), err);
+    		mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("UART driver cleanup failed: %s"), esp_err_to_name(err));
 		}
 
-		mp_hal_delay_ms(10);
+		vTaskDelay(pdMS_TO_TICKS(10));
 	}
 
 	// Configuring UART parameters
@@ -57,19 +57,19 @@ mp_obj_t neo_m8_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, 
 	// Configuring UART
 	err = uart_param_config(uart_num, &uart_config);
 	if (err != ESP_OK) {
-    	mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("UART driver config failed: %d"), err);
+    	mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("UART driver config failed: %s"), esp_err_to_name(err));
 	}
 
 	err = uart_set_pin(uart_num, uart_tx_pin, uart_rx_pin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
 	if (err != ESP_OK) {
-   		mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("UART driver pin config failed: %d"), err);
+   		mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("UART driver pin config failed: %s"), esp_err_to_name(err));
 	}
 
 	// Creating the ESP-IDF UART - 512 byte RXbuf, 0 byte TXbuf (as I want writing UART info to be blocking, so that
 	// the code doesn't go looking for ACKs/NACKs before a command has been sent)
 	err = uart_driver_install(uart_num, 512, 0, 0, NULL, 0);
 	if (err != ESP_OK){
-   		mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("UART driver install failed: %d"), err);
+   		mp_raise_msg_varg(&mp_type_RuntimeError, MP_ERROR_TEXT("UART driver install failed: %s"), esp_err_to_name(err));
 	}
 
 	// Creating and allocating memory to the "self" instance of this module
@@ -85,7 +85,7 @@ mp_obj_t neo_m8_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, 
 	self->data.gga = NULL;
 	self->data.rmc = NULL;
 
-	mp_hal_delay_ms(100);
+	vTaskDelay(pdMS_TO_TICKS(100));
 
 	return MP_OBJ_FROM_PTR(self);
 }
@@ -178,12 +178,12 @@ static void update_data(neo_m8_obj_t *self){
 	*/
 	uint8_t sentences_read = 0;
 	int16_t start_pos = -1, end_pos = -1;
-	uint32_t start_time = mp_hal_ticks_ms();
+	uint64_t start_time = esp_timer_get_time();
 	char nmea_sentence_type[4];
 
 	while (sentences_read < 5){
 		// Timeout for the function. If it's running for more than 1 second, then the function quits and raises an error
-		if (mp_hal_ticks_ms() - start_time > 1000){
+		if (esp_timer_get_time() - start_time > 1000000){
 			mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("Function timed out - no valid NMEA data found in buffer."));
 		}
 
@@ -334,12 +334,12 @@ static void extract_lat_long(char* nmea_section, float* output){
 }
 
 static int8_t ubx_ack_nack(neo_m8_obj_t *self){
-	uint32_t start_time = mp_hal_ticks_ms();
+	uint64_t start_time = esp_timer_get_time();
 	uint16_t i;
 
 	// This function times out after 1s of looking for an ACK/NACK
-	while (mp_hal_ticks_ms() - start_time < 1000){
-		mp_hal_delay_ms(10);
+	while (esp_timer_get_time() - start_time < 1000000){
+		vTaskDelay(pdMS_TO_TICKS(10));
 
 		update_buffer_internal(self->uart_number, &self->buffer_length, self->buffer);
 

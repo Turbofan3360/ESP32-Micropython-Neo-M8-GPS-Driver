@@ -12,6 +12,8 @@
 
 #include "driver/uart.h"
 #include "driver/gpio.h"
+#include "freertos/timers.h"
+#include "esp_timer.h"
 
 // Constant definitions
 #define CHAR_PTR_SIZE sizeof(char*)
