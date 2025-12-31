@@ -441,8 +441,8 @@ static int8_t parse_gsa(neo_m8_obj_t* self){
      * Parses the GSA NMEA sentence
     */
     nmea_sentence_data_t gsa_sentence;
-    char gsa_copy[83], **gsa_split = NULL;
-    uint8_t i;
+    char field[5];
+    uint8_t i, j, field_end;
 
     // Getting pointer to the start of the GSA sentence in the buffer
     get_sentence(self, &gsa_sentence, "GSA\0");
@@ -452,29 +452,22 @@ static int8_t parse_gsa(neo_m8_obj_t* self){
         return -1;
 	}
 
-    // Copying sentence as strtok is destructive
-    strncpy(gsa_copy, gsa_sentence.sentence_start, gsa_sentence.length);
-    gsa_copy[gsa_sentence.length] = '\0';
+    // Searching backwards through the GSA sentence for the field
+    for (i = gsa_sentence.length; j < 2; i--){
+        if (*(gsa_sentence.sentence_start + i) == ','){
+            j ++;
 
-    // Splitting up the GSA sentence
-    char* token = strtok(gsa_copy, ",");
-	for (i = 0; token != NULL; i++){
-		// Re-allocating extended memory - the length of the GSA sentence is unknown
-		gsa_split = (char **) realloc(gsa_split, (i+1)*CHAR_PTR_SIZE);
+            if (j == 1){
+                field_end = j;
+            }
+        }
+    }
 
-		if (gsa_split == NULL){
-			mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
-		}
-
-		gsa_split[i] = token;
-
-		token = strtok(NULL, ",");
-	}
+    // Copying the field out
+    strncpy(field, gsa_sentence.sentence_start + j, field_end-j);
 
     // Extracting vertical error
-    self->data.vertical_error = atof(gsa_split[i-1])*5;
-
-	free(gsa_split);
+    self->data.vertical_error = atof(field)*5;
 
     // Removing this NMEA sentence from the buffer
     memmove(gsa_sentence.sentence_start, gsa_sentence.sentence_start + gsa_sentence.length, gsa_sentence.length);
