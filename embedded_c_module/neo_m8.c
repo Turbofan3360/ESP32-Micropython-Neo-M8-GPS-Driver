@@ -179,8 +179,8 @@ static void get_sentence(neo_m8_obj_t *self, nmea_sentence_data* output, char* d
 	uint64_t start_time = esp_timer_get_time();
 	char nmea_sentence_type[4];
 
-    // Function times out if it's running for more than 1 second
-    while (esp_timer_get_time() - start_time < 1e6){
+    // Function times out if it's running for more than 0.1 seconds
+    while (esp_timer_get_time() - start_time < 1e5){
         update_buffer_internal(self);
 
 		start_pos = find_in_char_array((char *) self->buffer, self->buffer_length, '$', 0);
@@ -279,7 +279,7 @@ static int8_t ubx_ack_nack(neo_m8_obj_t *self){
 	uint16_t i;
 
 	// This function times out after 1s of looking for an ACK/NACK
-	while (esp_timer_get_time() - start_time < 1000000){
+    while (esp_timer_get_time() - start_time < 1e6){
 		vTaskDelay(pdMS_TO_TICKS(10));
 
 		update_buffer_internal(self);
@@ -350,7 +350,7 @@ static int8_t parse_gga(neo_m8_obj_t* self){
 	}
 
     // Extracting longitude in degrees decimal minutes
-    extract_lat_long(gga_split[4], &(self->data.longitude)));
+    extract_lat_long(gga_split[4], &(self->data.longitude));
 
 	if (strcmp(gga_split[5], "W") == 0){
         self->data.longitude *= -1;
@@ -369,7 +369,8 @@ static int8_t parse_gga(neo_m8_obj_t* self){
     extract_timestamp(gga_split[1], self->data.timestamp);
 
     // Removing this NMEA sentence from the buffer
-    memmove(gga_sentence.sentence_start, gga_sentence.sentence_start + gga_sentence.length, gga_sentence.length);
+    memmove(gga_sentence.sentence_start, gga_sentence.sentence_start + gga_sentence.length, self->buffer_length-(gga_sentence.sentence_start-self->buffer)-gga_sentence.length);
+    self->buffer_length -= gga_sentence.length;
 
     return 1;
 }
@@ -431,7 +432,8 @@ static int8_t parse_rmc(neo_m8_obj_t* self){
     self->data.date = rmc_split[i-2];
 
     // Removing this NMEA sentence from the buffer
-    memmove(rmc_sentence.sentence_start, rmc_sentence.sentence_start + rmc_sentence.length, rmc_sentence.length);
+    memmove(rmc_sentence.sentence_start, rmc_sentence.sentence_start + rmc_sentence.length, self->buffer_length-(rmc_sentence.sentence_start-self->buffer)-rmc_sentence.length);
+    self->buffer_length -= rmc_sentence.length;
 
     return 1;
 }
@@ -453,28 +455,28 @@ static int8_t parse_gsa(neo_m8_obj_t* self){
 	}
 
     // Searching backwards through the GSA sentence for the field
-    for (i = gsa_sentence.length; j < 2; i--){
+    for (i = gsa_sentence.length; (i > 0) && (j < 2); i--){
+        // Looking for commas
         if (*(gsa_sentence.sentence_start + i) == ','){
             j ++;
 
+            // First comma found is the end of the VDOP field
             if (j == 1){
                 field_end = j;
             }
-        }
-
-        if (i == 0){
-            return 0;
         }
     }
 
     // Copying the field out
     strncpy(field, gsa_sentence.sentence_start + j, field_end-j);
+    field[4] = '\0';
 
     // Extracting vertical error
     self->data.vertical_error = atof(field)*5;
 
     // Removing this NMEA sentence from the buffer
-    memmove(gsa_sentence.sentence_start, gsa_sentence.sentence_start + gsa_sentence.length, gsa_sentence.length);
+    memmove(gsa_sentence.sentence_start, gsa_sentence.sentence_start + gsa_sentence.length, self->buffer_length-(gsa_sentence.sentence_start-self->buffer)-gsa_sentence.length);
+    self->buffer_length -= gsa_sentence.length;
 
     return 1;
 }
@@ -584,7 +586,7 @@ mp_obj_t getdata(mp_obj_t self_in){
     err3 = parse_gsa(self);
 
     // Checking for errors
-    if ((err1 != 1) || (err2 != 2) || (err3 != 1)){
+    if ((err1 != 1) || (err2 != 1) || (err3 != 1)){
 		return mp_obj_new_list(9, (mp_obj_t[9]){mp_obj_new_float(0.0f),
                                                 mp_obj_new_float(0.0f),
 												mp_obj_new_float(0.0f),
