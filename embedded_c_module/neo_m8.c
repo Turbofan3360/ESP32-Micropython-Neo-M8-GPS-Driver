@@ -93,7 +93,7 @@ mp_obj_t neo_m8_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, 
 static int16_t find_in_char_array(char *array, uint16_t length, char character_to_look_for, int16_t starting_point){
 	/**
 	 * Utility to find the index of a specific character in a string
-	 * Basically, a C implementation of .find() in python 
+	 * Basically, a C implementation of .find() in python
 	 * Returns the index of the character, or -1 if it's not found
 	*/
 	uint16_t i;
@@ -141,7 +141,7 @@ static uint8_t nmea_checksum(char *nmea_sentence, uint8_t length){
 	}
 }
 
-static void update_buffer_internal(uart_port_t uart_num, uint16_t* length, uint8_t* buffer){
+static void update_buffer_internal(neo_m8_obj_t* self){
 	/**
 	 * Function to handle writing data into a 512-byte sliding window buffer
 	*/
@@ -149,45 +149,39 @@ static void update_buffer_internal(uart_port_t uart_num, uint16_t* length, uint8
 	size_t data_bytes_available;
 
 	// Checking for potential buffer overflow
-	uart_get_buffered_data_len(uart_num, &data_bytes_available);
+    uart_get_buffered_data_len(self->uart_number, &data_bytes_available);
 	if (data_bytes_available > 500){
-		uart_flush_input(uart_num);
+        uart_flush_input(self->uart_number);
 	}
 
-	if (*length == 512){
-		// Sliding the window a fixed amount
-		memmove(buffer, buffer + 448, 64);
-		*length = 64;
+    if (self->buffer_length == 512){
+        // Sliding the window a fixed amount 448 bytes
+        memmove(self->buffer, self->buffer + 448, 64);
+		self->buffer_length = 64;
 	}
 
-	length_read = uart_read_bytes(uart_num, buffer + *length, 512 - *length, 1);
+    length_read = uart_read_bytes(self->uart_number, self->buffer + self->buffer_length, 512 - self->buffer_length, 1);
 
 	if (length_read < 0){
 		mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("UART reading error"));
 	}
 
-	*length += length_read;
+    self->buffer_length += length_read;
 }
 
-static void update_data(neo_m8_obj_t *self){
+static void get_sentence(neo_m8_obj_t *self, nmea_sentence_data* output, char* desired_sentence){
 	/**
-	 * Handles updating the NMEA sentences stored in the driver object
-	 * Looks for the start/end of the NMEA sentence, copies that over into the object, and removes that section from the buffer
-	 * Then works out the sentence type and stores it accordingly
+     * Looks for a certain NMEA sentence, returns a pointer in the buffer to that sentence
 	 * Times out after 1 second of running
 	*/
-	uint8_t sentences_read = 0;
+    uint8_t sentence_length;
 	int16_t start_pos = -1, end_pos = -1;
 	uint64_t start_time = esp_timer_get_time();
 	char nmea_sentence_type[4];
 
-	while (sentences_read < 5){
-		// Timeout for the function. If it's running for more than 1 second, then the function quits and raises an error
-		if (esp_timer_get_time() - start_time > 1000000){
-			mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("Function timed out - no valid NMEA data found in buffer."));
-		}
-
-		update_buffer_internal(self->uart_number, &self->buffer_length, self->buffer);
+    // Function times out if it's running for more than 1 second
+    while (esp_timer_get_time() - start_time < 1e6){
+        update_buffer_internal(self);
 
 		start_pos = find_in_char_array((char *) self->buffer, self->buffer_length, '$', 0);
 		end_pos = find_in_char_array((char *) self->buffer, self->buffer_length, '\n', start_pos);
@@ -196,83 +190,30 @@ static void update_data(neo_m8_obj_t *self){
 			continue;
 		}
 
-		// Allocating memory to and copying the NMEA sentence it's found into a temporary variable
-		size_t sentence_length = end_pos - start_pos;
-		char *data_section = (char *) malloc(sentence_length + 1);
-
-		if (data_section == NULL){
-			mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
-		}
-
-		strncpy(data_section, (char *) (self->buffer + start_pos), sentence_length);
-		data_section[sentence_length] = '\0';
-
-		// Removing the section of the buffer used by the data_section NMEA sentence
-		memmove(self->buffer, self->buffer + end_pos, self->buffer_length - end_pos);
-		self->buffer_length -= end_pos;
+        sentence_length = end_pos - start_pos;
 
 		// Checking the NMEA checksum
-		if (nmea_checksum(data_section, sentence_length) == 0){
-			free(data_section);
+        if (nmea_checksum(self->buffer+start_pos, sentence_length) == 0){
 			continue;
 		}
 
-		// Finding the type of NMEA sentence it is, then saving it into memory
-		strncpy(nmea_sentence_type, data_section + 3, 3);
+        // Extracting sentence type
+        strncpy(nmea_sentence_type, self->buffer+start_pos+3, 3);
 		nmea_sentence_type[3] = '\0';
 
-		if (strcmp(nmea_sentence_type, "GLL") == 0){
-			self->data.gll = (char *) realloc(self->data.gll, sentence_length + 1);
+        // Checking if it's the sentence type we want
+        if (strcmp(nmea_sentence_type, desired_sentence) == 0){
+            output->sentence_start = self->buffer + start_pos;
+            output->length = sentence_length;
 
-			if (self->data.gll == NULL){
-				// Error: out of memory
-				free(data_section);
-				mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
-			}
-
-			strncpy(self->data.gll, data_section, sentence_length);
-			self->data.gll[sentence_length] = '\0';
+            return;
 		}
-		else if(strcmp(nmea_sentence_type, "GSA") == 0){
-			self->data.gsa = (char *) realloc(self->data.gsa, sentence_length + 1);
+    }
 
-			if (self->data.gsa == NULL){
-				// Error: out of memory
-				free(data_section);
-				mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
-			}
+    output->sentence_start = NULL;
+    output->length = 0;
 
-			strncpy(self->data.gsa, data_section, sentence_length);
-			self->data.gsa[sentence_length] = '\0';
-		}
-		else if(strcmp(nmea_sentence_type, "GGA") == 0){
-			self->data.gga = (char *) realloc(self->data.gga, sentence_length + 1);
-
-			if (self->data.gga == NULL){
-				// Error: out of memory
-				free(data_section);
-				mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
-			}
-
-			strncpy(self->data.gga, data_section, sentence_length);
-			self->data.gga[sentence_length] = '\0';
-		}
-		else if(strcmp(nmea_sentence_type, "RMC") == 0){
-			self->data.rmc = (char *) realloc(self->data.rmc, sentence_length + 1);
-
-			if (self->data.rmc == NULL){
-				// Error: out of memory
-				free(data_section);
-				mp_raise_msg(&mp_type_MemoryError, MP_ERROR_TEXT("Could not allocate memory"));
-			}
-
-			strncpy(self->data.rmc, data_section, sentence_length);
-			self->data.rmc[sentence_length] = '\0';
-		}
-
-		sentences_read++;
-		free(data_section);
-	}
+    return;
 }
 
 static void extract_timestamp(char* nmea_section, char* timestamp_out){
@@ -341,7 +282,7 @@ static int8_t ubx_ack_nack(neo_m8_obj_t *self){
 	while (esp_timer_get_time() - start_time < 1000000){
 		vTaskDelay(pdMS_TO_TICKS(10));
 
-		update_buffer_internal(self->uart_number, &self->buffer_length, self->buffer);
+		update_buffer_internal(self);
 
 		// Making sure no buffer underflow is possible
 		if (self->buffer_length < 4){
@@ -374,7 +315,7 @@ mp_obj_t update_buffer(mp_obj_t self_in){
 	*/
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
-	update_buffer_internal(self->uart_number, &self->buffer_length, self->buffer);
+	update_buffer_internal(self);
 
 	return mp_const_none;
 }
@@ -389,20 +330,20 @@ mp_obj_t position(mp_obj_t self_in){
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
 	uint8_t i;
+    nmea_sentence_data_t gga_sentence;
 	char *gga_split[9], timestamp[9], gga_copy[83];
 	float latitude, longitude, pos_error;
 
-	update_data(self);
+    get_sentence(self, &gga_sentence, "GGA");
 
-	// Checking for null pointers
-	if (self->data.gga == NULL){
+	// Checking for null pointer
+    if (gga_sentence.sentence_start == NULL){
 		return mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
 	}
 
 	// Creating a copy of the GGA sentence as strtok is destructive
-	// Uses fixed length of 83 bytes, the maximum sentence length in NMEA 0183 Version 4.10
-	strncpy(gga_copy, self->data.gga, 82);
-	gga_copy[82] = '\0';
+    strncpy(gga_copy, gga_sentence.sentence_start, gga_sentence.length);
+    gga_copy[gga_sentence.length] = '\0';
 
 	// Splitting the GLL sentence up into sections, which can then be processed
 	char *token = strtok(gga_copy, ",");
@@ -450,20 +391,21 @@ mp_obj_t velocity(mp_obj_t self_in){
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
 	uint8_t i;
+    nmea_sentence_data_t rmc_sentence
 	char *rmc_split[13], timestamp[9], rmc_copy[83];
 	float sog, cog;
 
-	update_data(self);
+    get_sentence(self, &rmc_sentence, "RMC");
 
 	// Checking for null pointers
-	if (self->data.rmc == NULL){
+    if (rmc_sentence.sentence_start == NULL){
 		return mp_obj_new_list(3, (mp_obj_t[3]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
 	}
 
 	// Creating a copy of the RMC sentence as strtok is destructive
 	// Uses fixed length of 83 bytes, the maximum sentence length in NMEA 0183 Version 4.10
-	strncpy(rmc_copy, self->data.rmc, 82);
-	rmc_copy[82] = '\0';
+    strncpy(rmc_copy, rmc_sentence.sentence_start, rmc_sentence.length);
+    rmc_copy[rmc_sentence.length] = '\0';
 
 	// Splitting the RMC sentence up into sections, which can then be processed
 	char *token = strtok(rmc_copy, ",");
@@ -504,22 +446,24 @@ mp_obj_t altitude(mp_obj_t self_in){
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
 	uint8_t i;
+    nmea_sentence_data_t gga_sentence, gsa_sentence;
 	char *gga_split[15], timestamp[9], gga_copy[83], gsa_copy[83], **gsa_split = NULL;
 	float altitude, geosep, verterror;
 
-	update_data(self);
+    get_sentence(self, &gga_sentence, "GGA");
+    get_sentence(self, &gsa_sentence, "GSA");
 
-	if ((self->data.gga == NULL) || (self->data.gsa == NULL)){
+    if ((gga_sentence.sentence_start == NULL) || (gsa_sentence.sentence_start == NULL)){
 		return mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
 	}
 
 	// Creating a copy of the GGA/GSA sentences as strtok is destructive
 	// Uses fixed length of 83 bytes, the maximum sentence length in NMEA 0183 Version 4.10
-	strncpy(gga_copy, self->data.gga, 82);
-	gga_copy[82] = '\0';
+    strncpy(gga_copy, gga_sentence.sentence_start, gga_sentence.length);
+    gga_copy[gga_sentence.length] = '\0';
 
-	strncpy(gsa_copy, self->data.gsa, 82);
-	gsa_copy[82] = '\0';
+    strncpy(gsa_copy, gsa_sentence.sentence_start, gsa_sentence.length);
+    gsa_copy[gsa_sentence.length] = '\0';
 
 	// Splitting the GGA sentence up into sections, which can then be processed
 	char *token = strtok(gga_copy, ",");
@@ -578,13 +522,16 @@ mp_obj_t getdata(mp_obj_t self_in){
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
 	uint8_t i, j;
+    nmea_sentence_data_t gga_sentence, rmc_sentence, gsa_sentence;
 	char *gga_split[15], *rmc_split[13], gga_copy[83], rmc_copy[83], gsa_copy[83], timestamp[9], **gsa_split = NULL;
 	float latitude, longitude, pos_error, altitude, geo_sep, verterror, sog, cog;
 
-	update_data(self);
+    get_sentence(self, &gga_sentence, "GGA");
+    get_sentence(self, &rmc_sentence, "RMC");
+    get_sentence(self, &gsa_sentence, "GSA");
 
 	// Checking for null pointers
-	if ((self->data.gga == NULL) || (self->data.gsa == NULL) || (self->data.rmc == NULL)){
+    if ((gga_sentence.sentence_start == NULL) || (gsa_sentence.sentence_start == NULL) || (rmc_sentence.sentence_start == NULL)){
 		return mp_obj_new_list(9, (mp_obj_t[9]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
 												mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
 												mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
@@ -594,14 +541,14 @@ mp_obj_t getdata(mp_obj_t self_in){
 
 	// Creating a copy of the GGA/GSA/RMC sentences as strtok is destructive
 	// Uses fixed length of 83 bytes, the maximum sentence length in NMEA 0183 Version 4.10
-	strncpy(gga_copy, self->data.gga, 82);
-	gga_copy[82] = '\0';
+    strncpy(gga_copy, gga_sentence.sentence_start, gga_sentence.length);
+    gga_copy[gga_sentence.length] = '\0';
 
-	strncpy(gsa_copy, self->data.gsa, 82);
+    strncpy(gsa_copy, gsa_sentence.sentence_start, gga_sentence.length);
 	gsa_copy[82] = '\0';
 
-	strncpy(rmc_copy, self->data.rmc, 82);
-	rmc_copy[82] = '\0';
+    strncpy(rmc_copy, rmc_sentence.sentence_start, rmc_sentence.length);
+    rmc_copy[rmc_sentence.length] = '\0';
 
 	// Splitting the GGA sentence up into sections, which can then be processed
 	char *token = strtok(gga_copy, ",");
@@ -704,15 +651,20 @@ mp_obj_t timestamp(mp_obj_t self_in){
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
 	uint8_t i;
+    nmea_sentence_data_t rmc_sentence;
 	char *rmc_split[13], rmc_copy[83], *token;
 	char timestamp[20] = "2000-01-01T00:00:00Z";
 
-	update_data(self);
+    get_sentence(self, &rmc_sentence, "RMC");
+
+    if (rmc_sentence.sentence_start == NULL){
+        return mp_obj_new_str(timestamp, 20);
+    }
 
 	// Creating a copy of the RMC sentences as strtok is destructive
 	// Uses fixed length of 83 bytes, the maximum sentence length in NMEA 0183 Version 4.10
-	strncpy(rmc_copy, self->data.rmc, 82);
-	rmc_copy[82] = '\0';
+    strncpy(rmc_copy, rmc_sentence.sentence_start, rmc_sentence.length);
+	rmc_copy[rmc_sentence.length] = '\0';
 
 	// Splitting the RMC sentence up into sections, which can then be processed
 	token = strtok(rmc_copy, ",");
