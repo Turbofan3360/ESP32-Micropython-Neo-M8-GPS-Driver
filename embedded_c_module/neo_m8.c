@@ -309,6 +309,131 @@ static int8_t ubx_ack_nack(neo_m8_obj_t *self){
 	return -1;
 }
 
+static int8_t parse_gga(neo_m8_obj_t* self){
+    /**
+     * Parses the GGA NMEA sentence
+    */
+    nmea_sentence_data_t gga_sentence;
+    char gga_copy[83];
+    char* gga_split[9];
+    uint8_t i;
+
+    // Collecting sentence position in buffer
+    get_sentence(self, &gga_sentence, "GGA\0");
+
+    // Checking for null pointer
+    if (gga_sentence.sentence_start == NULL){
+        return -1;
+    }
+
+    // Creating a copy of the GGA sentence as strtok is destructive
+    strncpy(gga_copy, gga_sentence.sentence_start, gga_sentence.length);
+    gga_copy[gga_sentence.length] = '\0';
+
+    // Splitting the GGA sentence up into sections, which can then be processed
+	char *token = strtok(gga_copy, ",");
+	for (i = 0; token != NULL; i++){
+		gga_split[i] = token;
+
+		token = strtok(NULL, ",");
+	}
+
+    // If not enough fields OR status flag indicates bad fix, then return zero
+	if ((i < 8) || (strcmp(gga_split[6], "1") != 0)){
+        return 0;
+	}
+
+    // Extracting latitude in degrees decimal minutes
+    extract_lat_long(gga_split[2], &(self->data.latitude));
+
+    if (strcmp(gga_split[3], "S") == 0){
+        self->data.latitude *= -1;
+	}
+
+    // Extracting longitude in degrees decimal minutes
+    extract_lat_long(gga_split[4], &(self->data.longitude)));
+
+	if (strcmp(gga_split[5], "W") == 0){
+        self->data.longitude *= -1;
+	}
+
+    // Extracting HDOP value, converting it to horizontal position error
+    self->data.position_error = atof(gga_split[8])*2.5;
+
+    // Extracting altitude
+    self->data.altitude = atof(gga_split[9]);
+
+	// Extracting geoid separation
+    self->data.geosep = atof(gga_split[11]);
+
+    // Extracting GMT timestamp in hh:mm:ss format
+    extract_timestamp(gga_split[1], self->data.timestamp);
+
+    return 1;
+
+    // TODO: TIDY UP NMEA SENTENCES IN BUFFER ONCE THEY'VE BEEN PARSED
+}
+
+static int8_t parse_rmc(neo_m8_obj_t* self){
+    /**
+     * Parses the RMC NMEA sentence
+    */
+    nmea_sentence_data_t rmc_sentence;
+    char rmc_copy[83];
+    char* rmc_split[13];
+    float cog
+    uint8_t i;
+
+    // Collecting RMC sentence position in buffer
+    get_sentence(self, &rmc_sentence, "RMC\0");
+
+	// Checking for null pointers
+    if (rmc_sentence.sentence_start == NULL){
+        return -1;
+	}
+
+	// Creating a copy of the RMC sentence as strtok is destructive
+	// Uses fixed length of 83 bytes, the maximum sentence length in NMEA 0183 Version 4.10
+    strncpy(rmc_copy, rmc_sentence.sentence_start, rmc_sentence.length);
+    rmc_copy[rmc_sentence.length] = '\0';
+
+    // Splitting the RMC sentence up into sections, which can then be processed
+	char *token = strtok(rmc_copy, ",");
+	for (i = 0; token != NULL; i++){
+		rmc_split[i] = token;
+
+		token = strtok(NULL, ",");
+	}
+
+    // If not enough fields OR status flag indicates bad fix, then return zero
+	if ((i < 8) || (strcmp(rmc_split[2], "A") != 0)){
+        return 0;
+	}
+
+    // Extracting timestamp
+    extract_timestamp(rmc_split[1], self->data.timestamp);
+
+	// Extracting SOG (knots)
+    self->data.sog = atof(rmc_split[7]);
+
+	// Extracting COG (degrees)
+    cog = atof(rmc_split[8]);
+
+	// If the COG is > 360 degrees, it means it's picked out the "date" field instead
+    // Which happens if the SOG isn't high enough for an accurate COG to be calculate. So -1 is saved instead
+    if (cog > 360.0f){
+        self->data.cog = -1;
+	}
+    else {
+        self->data.cog = cog;
+    }
+
+    // Extracting date
+    self->data.date = atoi(rmc_split[i-2]);
+
+    return 1;
+}
+
 mp_obj_t update_buffer(mp_obj_t self_in){
 	/**
 	 * Exposing the update_buffer_internal function to micropython
@@ -328,57 +453,19 @@ mp_obj_t position(mp_obj_t self_in){
 	 *                    |degrees/decimal minutes|    meters    | GMT hh:mm:ss
 	*/
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    int8_t err;
 
-	uint8_t i;
-    nmea_sentence_data_t gga_sentence;
-	char *gga_split[9], timestamp[9], gga_copy[83];
-	float latitude, longitude, pos_error;
+    err = parse_gga(self);
 
-    get_sentence(self, &gga_sentence, "GGA");
-
-	// Checking for null pointer
-    if (gga_sentence.sentence_start == NULL){
+    // Checking for errors
+    if (err != 1){
 		return mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
 	}
 
-	// Creating a copy of the GGA sentence as strtok is destructive
-    strncpy(gga_copy, gga_sentence.sentence_start, gga_sentence.length);
-    gga_copy[gga_sentence.length] = '\0';
-
-	// Splitting the GLL sentence up into sections, which can then be processed
-	char *token = strtok(gga_copy, ",");
-	for (i = 0; token != NULL; i++){
-		gga_split[i] = token;
-
-		token = strtok(NULL, ",");
-	}
-
-	// If there aren't enough fields (i.e. incomplete sentence, bad data) OR status flag indicates bad fix, then return zeros
-	if ((i < 8) || (strcmp(gga_split[6], "1") != 0)){
-		return mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
-	}
-
-	// Extracting GMT timestamp in hh:mm:ss format
-	extract_timestamp(gga_split[1], timestamp);
-
-	// Extracting latitude in degrees decimal minutes
-	extract_lat_long(gga_split[2], &latitude);
-
-	if (strcmp(gga_split[3], "S") == 0){
-		latitude *= -1;
-	}
-
-	// Extracting longitude in degrees decimal minutes
-	extract_lat_long(gga_split[4], &longitude);
-
-	if (strcmp(gga_split[5], "W") == 0){
-		longitude *= -1;
-	}
-
-	// Extracting HDOP value, converting it to horizontal position error
-	pos_error = atof(gga_split[8])*2.5;
-
-	return mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(latitude), mp_obj_new_float(longitude), mp_obj_new_float(pos_error), mp_obj_new_str(timestamp, 8)});
+    return mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(self->data.latitude),
+                                            mp_obj_new_float(self->data.longitude),
+                                            mp_obj_new_float(self->data.position_error)
+                                            mp_obj_new_str(self->data.timestamp, 8)});
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_position_obj, position);
 
@@ -389,52 +476,20 @@ mp_obj_t velocity(mp_obj_t self_in){
 	 * Course over ground is returned as Python Nonetype if not availible due to speed being too low
 	*/
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
+    int8_t err;
 
-	uint8_t i;
-    nmea_sentence_data_t rmc_sentence
-	char *rmc_split[13], timestamp[9], rmc_copy[83];
-	float sog, cog;
+    err = parse_rmc(self);
 
-    get_sentence(self, &rmc_sentence, "RMC");
-
-	// Checking for null pointers
-    if (rmc_sentence.sentence_start == NULL){
+    // Checking for errors
+    if (err != 1){
 		return mp_obj_new_list(3, (mp_obj_t[3]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
 	}
 
-	// Creating a copy of the RMC sentence as strtok is destructive
-	// Uses fixed length of 83 bytes, the maximum sentence length in NMEA 0183 Version 4.10
-    strncpy(rmc_copy, rmc_sentence.sentence_start, rmc_sentence.length);
-    rmc_copy[rmc_sentence.length] = '\0';
+    if (self->data.cog == -1){
+        return mp_obj_new_list(3, (mp_obj_t[3]){mp_obj_new_float(self->data.sog), mp_obj_new_float(mp_const_none), mp_obj_new_str(self->data.timestamp, 8)});
+    }
 
-	// Splitting the RMC sentence up into sections, which can then be processed
-	char *token = strtok(rmc_copy, ",");
-	for (i = 0; token != NULL; i++){
-		rmc_split[i] = token;
-
-		token = strtok(NULL, ",");
-	}
-
-	if ((i < 8) || (strcmp(rmc_split[2], "A") != 0)){
-		return mp_obj_new_list(3, (mp_obj_t[3]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
-	}
-
-	// Extracting timestamp
-	extract_timestamp(rmc_split[1], timestamp);
-
-	// Extracting SOG (knots)
-	sog = atof(rmc_split[7]);
-
-	// Extracting COG (degrees)
-	cog = atof(rmc_split[8]);
-
-	// If the COG is > 360 degrees, it means it's picked out the "date" field instead
-	// Which happens if the SOG isn't high enough for an accurate COG to be calculate. So None is returned instead
-	if (cog > 360.0f){
-		return mp_obj_new_list(3, (mp_obj_t[3]){mp_obj_new_float(sog), mp_const_none, mp_obj_new_str(timestamp, 8)});
-	}
-
-	return mp_obj_new_list(3, (mp_obj_t[3]){mp_obj_new_float(sog), mp_obj_new_float(cog), mp_obj_new_str(timestamp, 8)});
+    return mp_obj_new_list(3, (mp_obj_t[3]){mp_obj_new_float(self->data.sog), mp_obj_new_float(self->data.cog), mp_obj_new_str(self->data.timestamp, 8)});
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_velocity_obj, velocity);
 
@@ -450,17 +505,22 @@ mp_obj_t altitude(mp_obj_t self_in){
 	char *gga_split[15], timestamp[9], gga_copy[83], gsa_copy[83], **gsa_split = NULL;
 	float altitude, geosep, verterror;
 
-    get_sentence(self, &gga_sentence, "GGA");
-    get_sentence(self, &gsa_sentence, "GSA");
+	// Creating a copy of the GGA/GSA sentences as strtok is destructive
+	// Uses fixed length of 83 bytes, the maximum sentence length in NMEA 0183 Version 4.10
+    get_sentence(self, &gga_sentence, "GGA\0");
 
-    if ((gga_sentence.sentence_start == NULL) || (gsa_sentence.sentence_start == NULL)){
+    if (gga_sentence.sentence_start == NULL){
 		return mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
 	}
 
-	// Creating a copy of the GGA/GSA sentences as strtok is destructive
-	// Uses fixed length of 83 bytes, the maximum sentence length in NMEA 0183 Version 4.10
     strncpy(gga_copy, gga_sentence.sentence_start, gga_sentence.length);
     gga_copy[gga_sentence.length] = '\0';
+
+    get_sentence(self, &gsa_sentence, "GSA\0");
+
+    if (gsa_sentence.sentence_start == NULL){
+		return mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_float(0.0f), mp_obj_new_str("0", 1)});
+	}
 
     strncpy(gsa_copy, gsa_sentence.sentence_start, gsa_sentence.length);
     gsa_copy[gsa_sentence.length] = '\0';
@@ -526,26 +586,46 @@ mp_obj_t getdata(mp_obj_t self_in){
 	char *gga_split[15], *rmc_split[13], gga_copy[83], rmc_copy[83], gsa_copy[83], timestamp[9], **gsa_split = NULL;
 	float latitude, longitude, pos_error, altitude, geo_sep, verterror, sog, cog;
 
-    get_sentence(self, &gga_sentence, "GGA");
-    get_sentence(self, &rmc_sentence, "RMC");
-    get_sentence(self, &gsa_sentence, "GSA");
+	// Creating a copy of the GGA/GSA/RMC sentences as strtok is destructive
+	// Uses fixed length of 83 bytes, the maximum sentence length in NMEA 0183 Version 4.10
+    get_sentence(self, &gga_sentence, "GGA\0");
 
-	// Checking for null pointers
-    if ((gga_sentence.sentence_start == NULL) || (gsa_sentence.sentence_start == NULL) || (rmc_sentence.sentence_start == NULL)){
+    // Checking for null pointers
+    if (gga_sentence.sentence_start == NULL){
 		return mp_obj_new_list(9, (mp_obj_t[9]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
 												mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
 												mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
 												mp_const_none, mp_obj_new_float(0.0f),
 												mp_obj_new_str("0", 1)});
-	}
+    }
 
-	// Creating a copy of the GGA/GSA/RMC sentences as strtok is destructive
-	// Uses fixed length of 83 bytes, the maximum sentence length in NMEA 0183 Version 4.10
     strncpy(gga_copy, gga_sentence.sentence_start, gga_sentence.length);
     gga_copy[gga_sentence.length] = '\0';
 
+    get_sentence(self, &gsa_sentence, "GSA\0");
+
+    // Checking for null pointers
+    if (gsa_sentence.sentence_start == NULL){
+		return mp_obj_new_list(9, (mp_obj_t[9]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
+												mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
+												mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
+												mp_const_none, mp_obj_new_float(0.0f),
+												mp_obj_new_str("0", 1)});
+    }
+
     strncpy(gsa_copy, gsa_sentence.sentence_start, gga_sentence.length);
 	gsa_copy[82] = '\0';
+
+    get_sentence(self, &gsa_sentence, "RMC\0");
+
+    // Checking for null pointers
+    if (rmc_sentence.sentence_start == NULL){
+		return mp_obj_new_list(9, (mp_obj_t[9]){mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
+												mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
+												mp_obj_new_float(0.0f), mp_obj_new_float(0.0f),
+												mp_const_none, mp_obj_new_float(0.0f),
+												mp_obj_new_str("0", 1)});
+    }
 
     strncpy(rmc_copy, rmc_sentence.sentence_start, rmc_sentence.length);
     rmc_copy[rmc_sentence.length] = '\0';

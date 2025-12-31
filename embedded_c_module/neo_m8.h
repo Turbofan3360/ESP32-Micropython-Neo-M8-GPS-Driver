@@ -26,6 +26,23 @@ typedef struct {
     uint8_t length;
 } nmea_sentence_data_t;
 
+// Struct to hold parsed data
+typedef struct {
+    float latitude;
+    float longitude;
+    float position_error;
+
+    float altitude;
+    float geosep;
+    float vertical_error;
+
+    float sog;
+    float cog;
+
+    char timestamp[20];
+    uint32_t date;
+} gps_data_t;
+
 // Object definition
 typedef struct {
 	mp_obj_base_t base;
@@ -33,6 +50,8 @@ typedef struct {
 
 	uint8_t buffer[INTERNAL_BUFFER_LENGTH];
 	uint16_t buffer_length;
+
+    gps_data_t data;
 } neo_m8_obj_t;
 
 // Function declarations
@@ -43,6 +62,9 @@ static void update_buffer_internal(neo_m8_obj_t* self);
 static void extract_timestamp(char* nmea_section, char* timestamp_out);
 static void extract_lat_long(char* nmea_section, float* output);
 static void get_sentence(neo_m8_obj_t *self, nmea_sentence_data* output, char* desired_sentence);
+
+static int8_t parse_gga(neo_m8_obj_t* self);
+static int8_t parse_rmc(neo_m8_obj_t* self);
 
 extern const mp_obj_type_t neo_m8_type;
 
