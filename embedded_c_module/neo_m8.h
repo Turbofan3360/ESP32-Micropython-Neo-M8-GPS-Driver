@@ -65,6 +65,7 @@ static void get_sentence(neo_m8_obj_t *self, nmea_sentence_data* output, char* d
 
 static int8_t parse_gga(neo_m8_obj_t* self);
 static int8_t parse_rmc(neo_m8_obj_t* self);
+static int8_t parse_gsa(neo_m8_obj_t* self);
 
 extern const mp_obj_type_t neo_m8_type;
 
