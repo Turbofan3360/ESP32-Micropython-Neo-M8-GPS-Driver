@@ -40,7 +40,7 @@ typedef struct {
     float cog;
 
     char timestamp[8];
-    uint32_t date;
+    char date[8];
 } gps_data_t;
 
 // Object definition

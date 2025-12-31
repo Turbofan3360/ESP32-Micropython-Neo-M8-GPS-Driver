@@ -428,7 +428,7 @@ static int8_t parse_rmc(neo_m8_obj_t* self){
     }
 
     // Extracting date
-    self->data.date = atoi(rmc_split[i-2]);
+    self->data.date = rmc_split[i-2];
 
     // Removing this NMEA sentence from the buffer
     memmove(rmc_sentence.sentence_start, rmc_sentence.sentence_start + rmc_sentence.length, rmc_sentence.length);
