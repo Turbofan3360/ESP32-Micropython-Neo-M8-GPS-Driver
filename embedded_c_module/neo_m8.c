@@ -628,49 +628,31 @@ mp_obj_t timestamp(mp_obj_t self_in){
 	*/
 	neo_m8_obj_t *self = MP_OBJ_TO_PTR(self_in);
 
-	uint8_t i;
-    nmea_sentence_data_t rmc_sentence;
-	char *rmc_split[13], rmc_copy[83], *token;
+    int8_t err;
 	char timestamp[20] = "2000-01-01T00:00:00Z";
 
-    get_sentence(self, &rmc_sentence, "RMC");
+    err = parse_rmc(self)
 
-    if (rmc_sentence.sentence_start == NULL){
+    // Checking for errors
+    if (err != 1){
         return mp_obj_new_str(timestamp, 20);
     }
 
-	// Creating a copy of the RMC sentences as strtok is destructive
-	// Uses fixed length of 83 bytes, the maximum sentence length in NMEA 0183 Version 4.10
-    strncpy(rmc_copy, rmc_sentence.sentence_start, rmc_sentence.length);
-	rmc_copy[rmc_sentence.length] = '\0';
-
-	// Splitting the RMC sentence up into sections, which can then be processed
-	token = strtok(rmc_copy, ",");
-	for (i = 0; token != NULL; i++){
-		rmc_split[i] = token;
-
-		token = strtok(NULL, ",");
-	}
-
-	if ((i < 8) || (strcmp(rmc_split[2], "A") != 0)){
-		return mp_obj_new_str(timestamp, 20);
-	}
-
 	// Formatting the date data
-	timestamp[8] = rmc_split[i-2][0];
-	timestamp[9] = rmc_split[i-2][1];
-	timestamp[5] = rmc_split[i-2][2];
-	timestamp[6] = rmc_split[i-2][3];
-	timestamp[2] = rmc_split[i-2][4];
-	timestamp[3] = rmc_split[i-2][5];
+    timestamp[8] = self->data.date[0];
+	timestamp[9] = self->data.date[1];
+	timestamp[5] = self->data.date[2];
+	timestamp[6] = self->data.date[3];
+	timestamp[2] = self->data.date[4];
+	timestamp[3] = self->data.date[5];
 
 	// Formatting the time data
-	timestamp[11] = rmc_split[1][0];
-	timestamp[12] = rmc_split[1][1];
-	timestamp[14] = rmc_split[1][2];
-	timestamp[15] = rmc_split[1][3];
-	timestamp[17] = rmc_split[1][4];
-	timestamp[18] = rmc_split[1][5];
+    timestamp[11] = self->data.timestamp[0];
+    timestamp[12] = self->data.timestamp[1];
+    timestamp[14] = self->data.timestamp[3];
+    timestamp[15] = self->data.timestamp[4];
+    timestamp[17] = self->data.timestamp[6];
+    timestamp[18] = self->data.timestamp[7];
 
 	return mp_obj_new_str(timestamp, 20);
 }

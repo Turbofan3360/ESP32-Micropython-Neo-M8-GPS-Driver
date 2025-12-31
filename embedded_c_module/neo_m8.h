@@ -39,7 +39,7 @@ typedef struct {
     float sog;
     float cog;
 
-    char timestamp[20];
+    char timestamp[8];
     uint32_t date;
 } gps_data_t;
 
