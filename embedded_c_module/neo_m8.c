@@ -368,9 +368,10 @@ static int8_t parse_gga(neo_m8_obj_t* self){
     // Extracting GMT timestamp in hh:mm:ss format
     extract_timestamp(gga_split[1], self->data.timestamp);
 
-    return 1;
+    // Removing this NMEA sentence from the buffer_length
+    memmove(gga_sentence.sentence_start, gga_sentence.sentence_start + gga_sentence.length, gga_sentence.length);
 
-    // TODO: TIDY UP NMEA SENTENCES IN BUFFER ONCE THEY'VE BEEN PARSED
+    return 1;
 }
 
 static int8_t parse_rmc(neo_m8_obj_t* self){
@@ -429,6 +430,9 @@ static int8_t parse_rmc(neo_m8_obj_t* self){
     // Extracting date
     self->data.date = atoi(rmc_split[i-2]);
 
+    // Removing this NMEA sentence from the buffer_length
+    memmove(rmc_sentence.sentence_start, rmc_sentence.sentence_start + rmc_sentence.length, rmc_sentence.length);
+
     return 1;
 }
 
@@ -475,6 +479,9 @@ static int8_t parse_gsa(neo_m8_obj_t* self){
     self->data.vertical_error = atof(gsa_split[i-1])*5;
 
 	free(gsa_split);
+
+    // Removing this NMEA sentence from the buffer_length
+    memmove(gsa_sentence.sentence_start, gsa_sentence.sentence_start + gsa_sentence.length, gsa_sentence.length);
 
     return 1;
 }
