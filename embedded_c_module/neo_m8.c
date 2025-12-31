@@ -461,6 +461,10 @@ static int8_t parse_gsa(neo_m8_obj_t* self){
                 field_end = j;
             }
         }
+
+        if (i == 0){
+            return 0;
+        }
     }
 
     // Copying the field out
