@@ -39,8 +39,8 @@ typedef struct {
     float sog;
     float cog;
 
-    char timestamp[8];
-    char date[8];
+    char timestamp[9];
+    char date[7];
 } gps_data_t;
 
 // Object definition

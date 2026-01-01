@@ -381,7 +381,7 @@ static int8_t parse_rmc(neo_m8_obj_t* self){
     */
     nmea_sentence_data_t rmc_sentence;
     char rmc_copy[83], *rmc_split[13];
-    float cog
+    float cog;
     uint8_t i;
 
     // Collecting RMC sentence position in buffer
@@ -429,7 +429,7 @@ static int8_t parse_rmc(neo_m8_obj_t* self){
     }
 
     // Extracting date
-    self->data.date = rmc_split[i-2];
+    strncpy(self->data.date, rmc_split[i-2], 6);
 
     // Removing this NMEA sentence from the buffer
     memmove(rmc_sentence.sentence_start, rmc_sentence.sentence_start + rmc_sentence.length, self->buffer_length-(rmc_sentence.sentence_start-self->buffer)-rmc_sentence.length);
@@ -444,7 +444,7 @@ static int8_t parse_gsa(neo_m8_obj_t* self){
     */
     nmea_sentence_data_t gsa_sentence;
     char field[5];
-    uint8_t i, j, field_end;
+    uint8_t i, j = 0, field_end;
 
     // Getting pointer to the start of the GSA sentence in the buffer
     get_sentence(self, &gsa_sentence, "GSA\0");
@@ -462,13 +462,13 @@ static int8_t parse_gsa(neo_m8_obj_t* self){
 
             // First comma found is the end of the VDOP field
             if (j == 1){
-                field_end = j;
+                field_end = i;
             }
         }
     }
 
     // Copying the field out
-    strncpy(field, gsa_sentence.sentence_start + j, field_end-j);
+    strncpy(field, gsa_sentence.sentence_start + j + 1, field_end-j);
     field[4] = '\0';
 
     // Extracting vertical error
@@ -534,7 +534,7 @@ mp_obj_t velocity(mp_obj_t self_in){
 
     if (self->data.cog == -1){
         return mp_obj_new_list(3, (mp_obj_t[3]){mp_obj_new_float(self->data.sog),
-                                                mp_obj_new_float(mp_const_none),
+                                                mp_const_none,
                                                 mp_obj_new_str(self->data.timestamp, 8)});
     }
 
@@ -633,7 +633,7 @@ mp_obj_t timestamp(mp_obj_t self_in){
     int8_t err;
 	char timestamp[20] = "2000-01-01T00:00:00Z";
 
-    err = parse_rmc(self)
+    err = parse_rmc(self);
 
     // Checking for errors
     if (err != 1){
