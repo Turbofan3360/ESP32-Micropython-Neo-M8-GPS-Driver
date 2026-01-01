@@ -61,7 +61,7 @@ static int8_t ubx_ack_nack(neo_m8_obj_t *self);
 static void update_buffer_internal(neo_m8_obj_t* self);
 static void extract_timestamp(char* nmea_section, char* timestamp_out);
 static void extract_lat_long(char* nmea_section, float* output);
-static void get_sentence(neo_m8_obj_t *self, nmea_sentence_data* output, char* desired_sentence);
+static void get_sentence(neo_m8_obj_t *self, nmea_sentence_data_t* output, char* desired_sentence);
 
 static int8_t parse_gga(neo_m8_obj_t* self);
 static int8_t parse_rmc(neo_m8_obj_t* self);

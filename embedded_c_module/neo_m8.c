@@ -80,11 +80,6 @@ mp_obj_t neo_m8_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, 
 	self->uart_number = uart_num;
 	self->buffer_length = 0;
 
-	self->data.gll = NULL;
-	self->data.gsa = NULL;
-	self->data.gga = NULL;
-	self->data.rmc = NULL;
-
 	vTaskDelay(pdMS_TO_TICKS(100));
 
 	return MP_OBJ_FROM_PTR(self);
@@ -169,7 +164,7 @@ static void update_buffer_internal(neo_m8_obj_t* self){
     self->buffer_length += length_read;
 }
 
-static void get_sentence(neo_m8_obj_t *self, nmea_sentence_data* output, char* desired_sentence){
+static void get_sentence(neo_m8_obj_t *self, nmea_sentence_data_t* output, char* desired_sentence){
 	/**
      * Looks for a certain NMEA sentence, returns a pointer in the buffer to that sentence
 	 * Times out after 1 second of running
@@ -193,12 +188,12 @@ static void get_sentence(neo_m8_obj_t *self, nmea_sentence_data* output, char* d
         sentence_length = end_pos - start_pos;
 
 		// Checking the NMEA checksum
-        if (nmea_checksum(self->buffer+start_pos, sentence_length) == 0){
+        if (nmea_checksum((char*)(self->buffer+start_pos), sentence_length) == 0){
 			continue;
 		}
 
         // Extracting sentence type
-        strncpy(nmea_sentence_type, self->buffer+start_pos+3, 3);
+        strncpy(nmea_sentence_type, (char*)(self->buffer+start_pos+3), 3);
 		nmea_sentence_type[3] = '\0';
 
         // Checking if it's the sentence type we want
@@ -314,7 +309,7 @@ static int8_t parse_gga(neo_m8_obj_t* self){
      * Parses the GGA NMEA sentence
     */
     nmea_sentence_data_t gga_sentence;
-    char gga_copy[83], *gga_split[9];
+    char gga_copy[83], *gga_split[14];
     uint8_t i;
 
     // Collecting sentence position in buffer
@@ -326,7 +321,7 @@ static int8_t parse_gga(neo_m8_obj_t* self){
     }
 
     // Creating a copy of the GGA sentence as strtok is destructive
-    strncpy(gga_copy, gga_sentence.sentence_start, gga_sentence.length);
+    strncpy(gga_copy, (char*)(gga_sentence.sentence_start), gga_sentence.length);
     gga_copy[gga_sentence.length] = '\0';
 
     // Splitting the GGA sentence up into sections, which can then be processed
@@ -394,7 +389,7 @@ static int8_t parse_rmc(neo_m8_obj_t* self){
 
 	// Creating a copy of the RMC sentence as strtok is destructive
 	// Uses fixed length of 83 bytes, the maximum sentence length in NMEA 0183 Version 4.10
-    strncpy(rmc_copy, rmc_sentence.sentence_start, rmc_sentence.length);
+    strncpy(rmc_copy, (char*)(rmc_sentence.sentence_start), rmc_sentence.length);
     rmc_copy[rmc_sentence.length] = '\0';
 
     // Splitting the RMC sentence up into sections, which can then be processed
@@ -444,7 +439,7 @@ static int8_t parse_gsa(neo_m8_obj_t* self){
     */
     nmea_sentence_data_t gsa_sentence;
     char field[5];
-    uint8_t i, j = 0, field_end;
+    uint8_t i, j = 0, field_end = 0;
 
     // Getting pointer to the start of the GSA sentence in the buffer
     get_sentence(self, &gsa_sentence, "GSA\0");
@@ -466,9 +461,13 @@ static int8_t parse_gsa(neo_m8_obj_t* self){
             }
         }
     }
+    // If there's some invalid GSA sentence and it doesn't have 2 commas, return
+    if (j != 2){
+        return -1;
+    }
 
     // Copying the field out
-    strncpy(field, gsa_sentence.sentence_start + j + 1, field_end-j);
+    strncpy(field, (char*)(gsa_sentence.sentence_start + j + 1), field_end-j);
     field[4] = '\0';
 
     // Extracting vertical error
@@ -511,7 +510,7 @@ mp_obj_t position(mp_obj_t self_in){
 
     return mp_obj_new_list(4, (mp_obj_t[4]){mp_obj_new_float(self->data.latitude),
                                             mp_obj_new_float(self->data.longitude),
-                                            mp_obj_new_float(self->data.position_error)
+                                            mp_obj_new_float(self->data.position_error),
                                             mp_obj_new_str(self->data.timestamp, 8)});
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(neo_m8_position_obj, position);
