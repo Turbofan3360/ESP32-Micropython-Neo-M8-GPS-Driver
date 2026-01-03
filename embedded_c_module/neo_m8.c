@@ -170,7 +170,7 @@ static void get_sentence(neo_m8_obj_t *self, nmea_sentence_data_t* output, char*
 	 * Times out after 1 second of running
 	*/
     uint8_t sentence_length;
-	int16_t start_pos = -1, end_pos = -1;
+    int16_t start_pos = 0, end_pos = 0;
 	uint64_t start_time = esp_timer_get_time();
 	char nmea_sentence_type[4];
 
@@ -178,8 +178,9 @@ static void get_sentence(neo_m8_obj_t *self, nmea_sentence_data_t* output, char*
     while (esp_timer_get_time() - start_time < 1e5){
         update_buffer_internal(self);
 
-		start_pos = find_in_char_array((char *) self->buffer, self->buffer_length, '$', 0);
-		end_pos = find_in_char_array((char *) self->buffer, self->buffer_length, '\n', start_pos);
+        start_pos = find_in_char_array((char *) self->buffer, self->buffer_length, '$', end_pos);
+        // Minimum NMEA sentence length seems to be 20 characters, so can skip 20 characters to search more efficiently
+        end_pos = find_in_char_array((char *) self->buffer, self->buffer_length, '\n', start_pos+20);
 
 		if ((start_pos == -1) || (end_pos == -1)){
 			continue;
@@ -307,6 +308,7 @@ static int8_t ubx_ack_nack(neo_m8_obj_t *self){
 static int8_t parse_gga(neo_m8_obj_t* self){
     /**
      * Parses the GGA NMEA sentence
+     * Returns 1 if all good, -1 if no sentence found, 0 if bad sentence
     */
     nmea_sentence_data_t gga_sentence;
     char gga_copy[83], *gga_split[14];
@@ -373,6 +375,7 @@ static int8_t parse_gga(neo_m8_obj_t* self){
 static int8_t parse_rmc(neo_m8_obj_t* self){
     /**
      * Parses the RMC NMEA sentence
+     * Returns 1 if all good, -1 if no sentence found, 0 if bad sentence
     */
     nmea_sentence_data_t rmc_sentence;
     char rmc_copy[83], *rmc_split[13];
@@ -436,10 +439,11 @@ static int8_t parse_rmc(neo_m8_obj_t* self){
 static int8_t parse_gsa(neo_m8_obj_t* self){
     /**
      * Parses the GSA NMEA sentence
+     * Returns 1 if all good, -1 if no sentence found, 0 if bad sentence
     */
     nmea_sentence_data_t gsa_sentence;
-    char field[5];
-    uint8_t i, j = 0, field_end = 0;
+    char field[6];
+    uint8_t i, comma_count = 0, field_end = 0;
 
     // Getting pointer to the start of the GSA sentence in the buffer
     get_sentence(self, &gsa_sentence, "GSA\0");
@@ -450,25 +454,30 @@ static int8_t parse_gsa(neo_m8_obj_t* self){
 	}
 
     // Searching backwards through the GSA sentence for the field
-    for (i = gsa_sentence.length; (i > 0) && (j < 2); i--){
+    for (i = gsa_sentence.length; i > 0; i--){
         // Looking for commas
         if (*(gsa_sentence.sentence_start + i) == ','){
-            j ++;
+            comma_count ++;
 
             // First comma found is the end of the VDOP field
-            if (j == 1){
+            if (comma_count == 1){
                 field_end = i;
+            }
+
+            // Find second comma at start of VDOP field
+            if (comma_count == 2){
+                break;
             }
         }
     }
     // If there's some invalid GSA sentence and it doesn't have 2 commas, return
-    if (j != 2){
+    if (comma_count != 2){
         return -1;
     }
 
     // Copying the field out
-    strncpy(field, (char*)(gsa_sentence.sentence_start + j + 1), field_end-j);
-    field[4] = '\0';
+    strncpy(field, (char*)(gsa_sentence.sentence_start + i + 1), field_end-i-1);
+    field[field_end-i-1] = '\0';
 
     // Extracting vertical error
     self->data.vertical_error = atof(field)*5;
