@@ -111,7 +111,7 @@ static int16_t find_in_char_array(char *array, uint16_t length, char character_t
 	return -1;
 }
 
-static uint8_t nmea_checksum(char *nmea_sentence, uint8_t length){
+static int8_t nmea_checksum(char *nmea_sentence, uint8_t length){
 	/**
 	 * Calculates and checks NMEA sentence checksums
 	 * Returns 1 for a correct checksum, and 0 for incorrect checksums
@@ -121,6 +121,10 @@ static uint8_t nmea_checksum(char *nmea_sentence, uint8_t length){
 
 	// Finding where the checksum starts
 	checksum_pos = find_in_char_array(nmea_sentence, length, '*', 0);
+
+    if (checksum_pos == -1){
+        return -1;
+    }
 
 	// Getting the checksum from the NMEA sentence (strtol converts from hex string to int)
 	char hex_checksum[3] = {nmea_sentence[checksum_pos+1], nmea_sentence[checksum_pos+2], '\0'};
@@ -158,7 +162,8 @@ static void update_buffer_internal(neo_m8_obj_t* self){
 		self->buffer_length = 64;
 	}
 
-    length_read = uart_read_bytes(self->uart_number, self->buffer + self->buffer_length, 512 - self->buffer_length, 1);
+    // Reading UART data into the buffer
+    length_read = uart_read_bytes(self->uart_number, self->buffer + self->buffer_length, 512 - self->buffer_length, 5);
 
 	if (length_read < 0){
 		mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("UART reading error"));
@@ -192,7 +197,7 @@ static void get_sentence(neo_m8_obj_t *self, nmea_sentence_data_t* output, char*
         sentence_length = end_pos - start_pos;
 
 		// Checking the NMEA checksum
-        if (nmea_checksum((char*)(self->buffer+start_pos), sentence_length) == 0){
+        if (nmea_checksum((char*)(self->buffer+start_pos), sentence_length) != 1){
 			continue;
 		}
 
