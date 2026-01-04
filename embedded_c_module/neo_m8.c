@@ -80,6 +80,9 @@ mp_obj_t neo_m8_make_new(const mp_obj_type_t *type, size_t n_args, size_t n_kw, 
 	self->uart_number = uart_num;
 	self->buffer_length = 0;
 
+    // Setting all data to 0
+    memset(&self->data, 0, sizeof(gps_data_t));
+
 	vTaskDelay(pdMS_TO_TICKS(100));
 
 	return MP_OBJ_FROM_PTR(self);
@@ -175,7 +178,7 @@ static void get_sentence(neo_m8_obj_t *self, nmea_sentence_data_t* output, char*
 	char nmea_sentence_type[4];
 
     // Function times out if it's running for more than 0.1 seconds
-    while (esp_timer_get_time() - start_time < 1e5){
+    while (esp_timer_get_time() - start_time < 2e5){
         update_buffer_internal(self);
 
         start_pos = find_in_char_array((char *) self->buffer, self->buffer_length, '$', end_pos);
