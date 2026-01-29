@@ -68,7 +68,7 @@ To do this, you will need:
 1. Enter your esp-idf directory, and run ./install.sh (only needs to be run the first time)
 2. Enter your esp-idf directory and run . ./export.sh (needs to be run every new terminal session)
 3. Download the files from embedded_c_module and place them in a directory of your choosing
-4. Enter your directory ~/micropython/ports/esp32 (can be replaced with whichever micropython board you are using)
+4. Enter your directory ~/micropython/ports/esp32 (can be replaced with whichever micropython board you are using if the code is suitably adapted)
 5. Run the make command, specifying USER_C_MODULES=/path/to/NEO-M8_GPS/embedded_c_module/micropython.cmake (replace with your file path)
 
 For me, with an ESP32-S3 that has octal SPIRAM, the full make command is:
